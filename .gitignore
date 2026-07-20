@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# État local du serveur MCP (sessions, tokens OAuth)
+.passerelle/
+*.session.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets — ne jamais committer
+*.env
+.env.local
+*token*.txt
+kubeconfig*

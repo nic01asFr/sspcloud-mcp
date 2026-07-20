@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sspcloud-mcp"
+version = "0.2.0"
+description = "Serveur MCP « Agent Compute » — poste de travail SSPCloud/Onyxia distant pour agents LLM"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "CEREMA" }]
+keywords = ["mcp", "sspcloud", "onyxia", "jupyter", "gpu", "llm", "claude", "cerema"]
+
+# Cœur autonome : websockets uniquement (le kernel Jupyter parle WebSocket).
+dependencies = ["websockets>=12"]
+
+[project.optional-dependencies]
+# Outils service_* (déploiement de services SSPCloud) — tirent le SDK Passerelle.
+service = [
+    "passerelle-sdk @ git+https://github.com/nic01asFr/Passerelle.git#subdirectory=sdk/python",
+]
+
+[project.scripts]
+# Serveur MCP stdio (Claude Desktop / Claude Code).
+sspcloud-mcp = "sspcloud_mcp.server:main"
+
+[project.urls]
+Repository = "https://gitlab.cerema.fr/mcp/sspcloud_mcp"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sspcloud_mcp*"]
