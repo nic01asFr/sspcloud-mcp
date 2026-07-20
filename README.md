@@ -50,6 +50,13 @@ Pod(s) SSPCloud  ── git clone · pip · pytest · GPU · notebooks · checkp
 
 ## Installation
 
+> **Nouveau venu ?** Suivez le guide pas-à-pas **[docs/ONBOARDING.md](docs/ONBOARDING.md)**
+> — installation individuelle, sur *votre* compte et *votre* namespace, en ~15 min.
+>
+> Usage **strictement individuel** : chaque personne installe le service pour son propre
+> namespace, avec son propre kubeconfig. Aucun compte central, aucun accès aux pods
+> d'autrui.
+
 ```bash
 git clone https://gitlab.cerema.fr/mcp/sspcloud_mcp.git
 cd sspcloud_mcp
