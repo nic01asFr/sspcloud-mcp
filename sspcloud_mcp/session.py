@@ -152,7 +152,7 @@ class SessionManager:
                       gpu: bool, password: str) -> tuple[str, str]:
         """Lance un pod via helm. Retourne (nom du pod, mot de passe = token)."""
         import subprocess, secrets
-        from ._helm import find_helm, ensure_helm_repo
+        from ._helm import find_helm, ensure_helm_repo, helm_env
         helm = find_helm()
         ensure_helm_repo(
             helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
@@ -168,7 +168,7 @@ class SessionManager:
                     "--set-string", "resources.limits.nvidia\\.com/gpu=1"]
         loop = asyncio.get_event_loop()
         r = await loop.run_in_executor(None, lambda: subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180))
+            cmd, capture_output=True, text=True, timeout=180, env=helm_env()))
         if r.returncode != 0:
             raise pod_unreachable(release, f"helm échoué : {r.stderr[-200:]}")
         pod = f"{release}-{chart}-0"
@@ -203,11 +203,10 @@ class SessionManager:
             released["port_forward"] = True
         if uninstall and s.pod:
             import subprocess
-            release = s.pod.rsplit("-jupyter", 1)[0].rsplit("-", 1)[0] \
-                if s.pod.endswith("-0") else s.pod
+            from ._helm import helm_env
             # nom de release = session_id par convention de _launch
             subprocess.run(["helm", "uninstall", session_id, "-n", s.namespace],
-                           capture_output=True, timeout=60)
+                           capture_output=True, timeout=60, env=helm_env())
             released["helm"] = True
         del self._sessions[session_id]
         self._save()
