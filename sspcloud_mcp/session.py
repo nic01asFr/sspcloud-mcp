@@ -26,7 +26,7 @@ from pathlib import Path
 
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
-from .errors import no_session, pod_unreachable
+from .errors import no_session, pod_unreachable, exec_timeout
 
 _REGISTRY = Path.home() / ".passerelle" / "mcp_sessions.json"
 _DEFAULT_WORKDIR = "/home/onyxia/work"
@@ -50,6 +50,7 @@ class DevSession:
     # transient (non sérialisé)
     _pf: object = field(default=None, repr=False, compare=False)
     _kernel: KernelClient | None = field(default=None, repr=False, compare=False)
+    _lock: object = field(default=None, repr=False, compare=False)  # asyncio.Lock lazy
 
     def touch(self) -> None:
         self.last_active = time.time()
@@ -222,12 +223,25 @@ class SessionManager:
 
     # ── Exécution ─────────────────────────────────────────────────────────────
 
+    def _lock_of(self, s: DevSession) -> asyncio.Lock:
+        """Verrou par session : un seul exec à la fois sur le kernel (évite le
+        recv concurrent sur le WebSocket → ConcurrencyError), et sérialise la
+        création lazy du kernel."""
+        if s._lock is None:
+            s._lock = asyncio.Lock()
+        return s._lock
+
     async def exec_python(self, session_id: str, code: str,
                           timeout: float = 120) -> ExecResult:
         s = self.get(session_id)
         s.touch()
-        kc = await self.ensure_kernel(s)
-        return await kc.execute(code, timeout=timeout)
+        async with self._lock_of(s):
+            kc = await self.ensure_kernel(s)
+            try:
+                return await kc.execute(code, timeout=timeout)
+            except TimeoutError:
+                await kc.interrupt()          # libère le kernel du code bloqué
+                raise exec_timeout(timeout)
 
     async def exec_bash(self, session_id: str, command: str,
                         timeout: float = 120) -> dict:
@@ -238,7 +252,6 @@ class SessionManager:
         """
         s = self.get(session_id)
         s.touch()
-        kc = await self.ensure_kernel(s)
         wrap = (
             "import subprocess as _sp, json as _json\n"
             f"_r = _sp.run({command!r}, shell=True, capture_output=True,"
@@ -246,15 +259,78 @@ class SessionManager:
             "print('__PMCP__' + _json.dumps("
             "{'rc': _r.returncode, 'stdout': _r.stdout, 'stderr': _r.stderr}))\n"
         )
-        res = await kc.execute(wrap, timeout=timeout)
+        async with self._lock_of(s):
+            kc = await self.ensure_kernel(s)
+            try:
+                res = await kc.execute(wrap, timeout=timeout)
+            except TimeoutError:
+                await kc.interrupt()
+                raise exec_timeout(timeout)
         marker = "__PMCP__"
         idx = res.stdout.rfind(marker)
         if idx >= 0:
             try:
-                payload = json.loads(res.stdout[idx + len(marker):])
-                return payload
+                return json.loads(res.stdout[idx + len(marker):])
             except Exception:
                 pass
         # Fallback : erreur kernel (syntaxe, etc.)
         return {"rc": -1, "stdout": res.stdout,
                 "stderr": res.stderr or (res.error or {}).get("evalue", "")}
+
+    # ── Traitements longs (tâche de fond) ──────────────────────────────────────
+
+    async def exec_background(self, session_id: str, code: str,
+                              lang: str = "python") -> dict:
+        """Lance un traitement long détaché (nohup) dans le pod, sans bloquer.
+
+        Le kernel reste libre ; suivre l'avancement avec poll_job(). Idéal pour
+        un entraînement / traitement de plusieurs minutes (pensez à écrire les
+        checkpoints sur volume persistant / S3, le pod pouvant être suspendu).
+        """
+        import uuid as _uuid, base64, shlex
+        s = self.get(session_id)
+        job_id = _uuid.uuid4().hex[:12]
+        d = "/tmp/mcp_jobs"
+        if lang == "bash":
+            target = code
+        else:
+            b64 = base64.b64encode(code.encode()).decode()
+            await self.exec_python(
+                session_id,
+                f"import base64,os; os.makedirs({d!r},exist_ok=True); "
+                f"open({d!r}+'/{job_id}.py','wb').write(base64.b64decode({b64!r}))",
+                timeout=60)
+            target = f"python {d}/{job_id}.py"
+        inner = f"{target}; echo $? > {d}/{job_id}.rc"
+        launch = (f"mkdir -p {d}; cd {shlex.quote(s.workdir)}; "
+                  f"nohup sh -c {shlex.quote(inner)} "
+                  f"> {d}/{job_id}.log 2>&1 < /dev/null & echo $!")
+        r = await self.exec_bash(session_id, launch, timeout=60)
+        pid = (r.get("stdout", "").strip().splitlines() or [""])[-1]
+        return {"job_id": job_id, "pid": pid,
+                "log": f"{d}/{job_id}.log", "background": True}
+
+    async def poll_job(self, session_id: str, job_id: str) -> dict:
+        """État d'un job background : running/terminé (+ code) + fin du log."""
+        import re
+        s = self.get(session_id)
+        s.touch()
+        d = "/tmp/mcp_jobs"
+        check = (
+            f"if [ -f {d}/{job_id}.rc ]; then echo \"__DONE__ $(cat {d}/{job_id}.rc)\"; "
+            f"else echo __RUNNING__; fi; echo __LOG__; "
+            f"tail -c 4000 {d}/{job_id}.log 2>/dev/null")
+        r = await self.exec_bash(session_id, check, timeout=60)
+        out = r.get("stdout", "")
+        head = out.split("__LOG__", 1)[0]
+        running = "__RUNNING__" in head
+        rc = None
+        m = re.search(r"__DONE__ (\S+)", head)
+        if m:
+            try:
+                rc = int(m.group(1))
+            except Exception:
+                rc = m.group(1)
+        log_tail = out.split("__LOG__\n", 1)[1] if "__LOG__\n" in out else ""
+        return {"job_id": job_id, "running": running, "exit_code": rc,
+                "log_tail": log_tail[-4000:]}

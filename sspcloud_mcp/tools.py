@@ -87,10 +87,17 @@ async def exec_tool(mgr, args: dict) -> dict:
     code = args["code"]
     lang = args.get("lang", "python")
     timeout = float(args.get("timeout", 120))
+    if args.get("background"):
+        # Traitement long détaché → handle immédiat, suivre avec job_poll.
+        return await mgr.exec_background(sid, code, lang=lang)
     if lang == "bash":
         return await mgr.exec_bash(sid, code, timeout=timeout)
     res = await mgr.exec_python(sid, code, timeout=timeout)
     return res.to_dict()
+
+
+async def job_poll(mgr, args: dict) -> dict:
+    return await mgr.poll_job(args["session_id"], args["job_id"])
 
 
 async def push_repo(mgr, args: dict) -> dict:
@@ -311,10 +318,17 @@ TOOLS: dict = {
 
     "exec": (exec_tool,
         "Exécute du code dans le pod. lang=python (kernel STATEFUL : variables et "
-        "modèle GPU persistent entre appels) ou lang=bash (shell). Sorties bornées.",
+        "modèle GPU persistent entre appels) ou lang=bash (shell). Sorties bornées. "
+        "background=true : traitement long détaché (entraînement...) → retourne un "
+        "job_id, suivre avec job_poll ; ne bloque pas le kernel.",
         _s({"session_id": _STR, "code": _STR,
             "lang": {"type": "string", "enum": ["python", "bash"]},
-            "timeout": _INT}, ["session_id", "code"])),
+            "timeout": _INT, "background": _BOOL}, ["session_id", "code"])),
+
+    "job_poll": (job_poll,
+        "État d'un traitement lancé en background (exec background=true) : "
+        "running/terminé (+ code de sortie) et fin du log.",
+        _s({"session_id": _STR, "job_id": _STR}, ["session_id", "job_id"])),
 
     "push_repo": (push_repo,
         "Envoie un repo dans le pod : URL git (github.com/org/repo, https://...git) "

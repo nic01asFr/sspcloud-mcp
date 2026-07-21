@@ -110,6 +110,7 @@ class KernelClient:
         self.kernel_id: str | None = None
         self.session = uuid.uuid4().hex
         self._ws = None
+        self._busy = False            # garde-fou anti-recv concurrent
 
     # ── Cycle de vie ──────────────────────────────────────────────────────────
 
@@ -187,13 +188,34 @@ class KernelClient:
     # ── Exécution ─────────────────────────────────────────────────────────────
 
     async def execute(self, code: str, timeout: float = 120) -> ExecResult:
-        """Exécute du code Python et collecte toutes les sorties jusqu'à idle."""
+        """Exécute du code Python et collecte toutes les sorties jusqu'à idle.
+
+        Non réentrant : un seul execute à la fois sur un kernel (un seul lecteur
+        du WebSocket), sinon `recv` concurrent → ConcurrencyError.
+        """
         if not self.alive:
             raise RuntimeError("Kernel non connecté — appelez start() d'abord.")
+        if self._busy:
+            raise RuntimeError("Kernel occupé : un exec est déjà en cours.")
+        self._busy = True
+        try:
+            frame, msg_id = _encode_execute(code, self.session)
+            await self._ws.send(frame)
+            return await self._collect(msg_id, timeout)
+        finally:
+            self._busy = False
 
-        frame, msg_id = _encode_execute(code, self.session)
-        await self._ws.send(frame)
-        return await self._collect(msg_id, timeout)
+    async def interrupt(self) -> None:
+        """Interrompt le code en cours (POST /api/kernels/{id}/interrupt).
+
+        Appelé après un timeout : libère le kernel du traitement bloqué pour que
+        la session reste utilisable.
+        """
+        if self.kernel_id:
+            try:
+                await self._http("POST", f"/api/kernels/{self.kernel_id}/interrupt")
+            except Exception:
+                pass
 
     async def _collect(self, parent_id: str, timeout: float) -> ExecResult:
         res = ExecResult()
