@@ -113,10 +113,31 @@ class KernelClient:
 
     # ── Cycle de vie ──────────────────────────────────────────────────────────
 
-    async def start(self, kernel_name: str = "python3") -> str:
-        """Crée un kernel puis ouvre le canal WebSocket. Retourne le kernel_id."""
+    async def start(self, kernel_name: str = "python3", warmup: float = 60) -> str:
+        """Crée un kernel puis ouvre le canal WebSocket. Retourne le kernel_id.
+
+        Réessaie tant que Jupyter n'est pas à l'écoute (pod fraîchement lancé :
+        phase Running ≠ serveur prêt ; cold start GPU jusqu'à plusieurs minutes).
+        """
+        import urllib.error
         body = json.dumps({"name": kernel_name}).encode()
-        resp = await self._http("POST", "/api/kernels", body)
+        deadline = asyncio.get_event_loop().time() + warmup
+        while True:
+            try:
+                resp = await self._http("POST", "/api/kernels", body)
+                break
+            except urllib.error.HTTPError as e:
+                # 502/503 = serveur en cours de démarrage → réessayer.
+                if e.code in (502, 503) and asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(3)
+                    continue
+                raise
+            except (urllib.error.URLError, ConnectionError, OSError):
+                # Connection refused / DNS : pod pas encore à l'écoute.
+                if asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(3)
+                    continue
+                raise
         self.kernel_id = resp["id"]
         await self._connect()
         return self.kernel_id
