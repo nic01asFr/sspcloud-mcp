@@ -60,6 +60,16 @@ def pod_running(pod: str, namespace: str) -> bool:
     return rc == 0 and out.strip() == "Running"
 
 
+def pod_ip(pod: str, namespace: str) -> str:
+    """IP réseau du pod — pour un accès pod-to-pod direct (in-cluster),
+    sans port-forward (qui a des soucis de WebSocket)."""
+    rc, out, err = kubectl("get", "pod", pod, "-o",
+                           "jsonpath={.status.podIP}", namespace=namespace,
+                           timeout=15)
+    _raise_if_forbidden(rc, err)
+    return out.strip()
+
+
 def find_jupyter_pod(namespace: str, name_filter: str = "") -> str | None:
     """Retourne le 1er pod Running dont le nom matche (défaut : jupyter)."""
     rc, out, err = kubectl(

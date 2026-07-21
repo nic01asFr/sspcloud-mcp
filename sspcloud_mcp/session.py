@@ -140,8 +140,16 @@ class SessionManager:
             if not T.pod_running(pod, namespace):
                 raise pod_unreachable(pod, "Pod non Running.")
             port = T.jupyter_port(pod, namespace)
-            s._pf = T.start_port_forward(pod, namespace, remote_port=port)
-            s.base_url = s._pf.base_url()
+            if T.in_cluster():
+                # Accès pod-to-pod direct par IP — pas de port-forward
+                # (le port-forward ne fait pas circuler les frames WS du kernel).
+                ip = T.pod_ip(pod, namespace)
+                if not ip:
+                    raise pod_unreachable(pod, "IP du pod introuvable.")
+                s.base_url = f"http://{ip}:{port}"
+            else:
+                s._pf = T.start_port_forward(pod, namespace, remote_port=port)
+                s.base_url = s._pf.base_url()
             s.token = token or T.get_jupyter_token(pod, namespace)
 
         self._sessions[session_id] = s
