@@ -127,10 +127,10 @@ def get_jupyter_token(pod: str, namespace: str) -> str:
         m = _TOKEN_RE.search(out)
         if m:
             return m.group(1)
-        if "http" in out and "token=" not in out:
-            return ""   # serveur sans token
+    # Mode password (security.password) : le token n'apparaît pas dans
+    # `jupyter server list` → lire l'env JUPYTER_TOKEN puis PASSWORD.
     rc, out, _ = exec_shell(pod, namespace,
-                            'printf %s "$JUPYTER_TOKEN"', timeout=15)
+                            'printf %s "${JUPYTER_TOKEN:-$PASSWORD}"', timeout=15)
     return out.strip() if rc == 0 else ""
 
 

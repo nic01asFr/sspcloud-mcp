@@ -114,18 +114,23 @@ class SessionManager:
             # Transport public (Onyxia) — sans kubectl.
             s.base_url = public_url.rstrip("/")
             s.token = token
-        elif not attach_pod and not launch_chart and T.in_cluster():
+        elif (not launch_chart and T.in_cluster()
+              and (not attach_pod or attach_pod == os.getenv("HOSTNAME", ""))):
             # Transport in-cluster : le serveur MCP est hébergé dans un pod et
             # pilote son PROPRE kernel via localhost. Aucun kubectl/port-forward.
+            # Marche même en stsonly (le token est lu localement, pas via kubectl).
             s.base_url = os.getenv("PASSERELLE_LOCAL_JUPYTER", "http://localhost:8888")
             s.token = token or T.local_jupyter_token()
             s.pod = os.getenv("HOSTNAME", "")
         else:
-            # Transport admin (kubectl) — port-forward.
+            # Transport admin/worker (kubectl) — port-forward.
             pod = attach_pod
             if not pod and launch_chart:
-                pod = await self._launch(namespace, session_id, launch_chart,
-                                         gpu, jupyter_password)
+                # Le worker est lancé avec un mot de passe connu → c'est le token
+                # Jupyter (jupyter server list ne l'expose pas en mode password).
+                pod, launch_pwd = await self._launch(
+                    namespace, session_id, launch_chart, gpu, jupyter_password)
+                token = token or launch_pwd
             if not pod:
                 pod = T.find_jupyter_pod(namespace) or ""
             if not pod:
@@ -144,8 +149,8 @@ class SessionManager:
         return s
 
     async def _launch(self, namespace: str, name: str, chart: str,
-                      gpu: bool, password: str) -> str:
-        """Lance un pod via helm (admin uniquement). Retourne le nom du pod."""
+                      gpu: bool, password: str) -> tuple[str, str]:
+        """Lance un pod via helm. Retourne (nom du pod, mot de passe = token)."""
         import subprocess, secrets
         from ._helm import find_helm, ensure_helm_repo
         helm = find_helm()
@@ -171,7 +176,7 @@ class SessionManager:
         deadline = time.time() + (600 if gpu else 180)
         while time.time() < deadline:
             if T.pod_running(pod, namespace):
-                return pod
+                return pod, pwd
             await asyncio.sleep(8)
         raise pod_unreachable(pod, "Pod pas Running dans le délai imparti.")
 
