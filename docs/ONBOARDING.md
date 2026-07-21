@@ -1,5 +1,10 @@
 # Installation individuelle — de zéro à opérationnel
 
+> 📸 **Version illustrée (recommandée) :** pour l'installation **dans un pod SSPCloud**
+> (fonctionne même en compte restreint `stsonly`), suivez **[INSTALL-IN-CLUSTER.md](INSTALL-IN-CLUSTER.md)**,
+> avec captures d'écran étape par étape. Le présent guide couvre l'alternative « depuis un
+> PC avec kubectl » (compte disposant des droits Kubernetes).
+
 Ce guide s'adresse à **chaque utilisateur** qui veut configurer `sspcloud-mcp` pour
 **son propre compte SSPCloud**. Usage individuel : vous pilotez **vos** pods dans
 **votre** namespace, avec **votre** kubeconfig. Rien n'est partagé avec un autre compte.
