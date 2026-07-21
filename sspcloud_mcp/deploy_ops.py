@@ -31,7 +31,12 @@ def _scripts_dir() -> Path:
 
 def _ctx():
     from passerelle.compute.service import SSPCloudContext
-    return SSPCloudContext.from_env()
+    ctx = SSPCloudContext.from_env()
+    # En hébergé (in-cluster), ONYXIA_USER peut être absent → l'URL publique
+    # devient "user--<svc>...". On dérive le username du namespace (user-<X>).
+    if not ctx.onyxia_user and ctx.namespace.startswith("user-"):
+        ctx.onyxia_user = ctx.namespace[len("user-"):]
+    return ctx
 
 
 def _yaml_path(path: str) -> Path:
