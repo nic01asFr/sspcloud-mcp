@@ -50,8 +50,10 @@ Pod(s) SSPCloud  ── git clone · pip · pytest · GPU · notebooks · checkp
 
 ## Installation
 
-> **Nouveau venu ?** Suivez le guide pas-à-pas **[docs/ONBOARDING.md](docs/ONBOARDING.md)**
-> — installation individuelle, sur *votre* compte et *votre* namespace, en ~15 min.
+> **Nouveau venu ?** Deux guides d'installation individuelle (votre compte, votre namespace) :
+> - **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)** — illustré, service dans un
+>   pod SSPCloud (fonctionne même en compte restreint `stsonly`). **Recommandé.**
+> - **[docs/ONBOARDING.md](docs/ONBOARDING.md)** — depuis un PC avec kubectl (compte avec droits).
 >
 > Usage **strictement individuel** : chaque personne installe le service pour son propre
 > namespace, avec son propre kubeconfig. Aucun compte central, aucun accès aux pods
