@@ -123,14 +123,12 @@ class SessionManager:
             s.token = token or T.local_jupyter_token()
             s.pod = os.getenv("HOSTNAME", "")
         else:
-            # Transport admin/worker (kubectl) — port-forward.
+            # Transport admin/worker (kubectl).
             pod = attach_pod
+            launch_pwd = ""
             if not pod and launch_chart:
-                # Le worker est lancé avec un mot de passe connu → c'est le token
-                # Jupyter (jupyter server list ne l'expose pas en mode password).
                 pod, launch_pwd = await self._launch(
                     namespace, session_id, launch_chart, gpu, jupyter_password)
-                token = token or launch_pwd
             if not pod:
                 pod = T.find_jupyter_pod(namespace) or ""
             if not pod:
@@ -150,7 +148,9 @@ class SessionManager:
             else:
                 s._pf = T.start_port_forward(pod, namespace, remote_port=port)
                 s.base_url = s._pf.base_url()
-            s.token = token or T.get_jupyter_token(pod, namespace)
+            # Token = le vrai $PASSWORD du pod (get_jupyter_token le lit), fallback
+            # sur le mot de passe qu'on vient de fixer au lancement.
+            s.token = token or T.get_jupyter_token(pod, namespace) or launch_pwd
 
         self._sessions[session_id] = s
         self._save()
