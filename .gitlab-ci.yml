@@ -1,0 +1,20 @@
+stages:
+  - test
+
+# Lint + tests unitaires (aucun cluster requis).
+# Le cœur s'installe sans l'extra [service] (les imports passerelle sont lazy).
+test:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -e .
+    - pip install pytest ruff
+  script:
+    - echo "== lint (advisory) =="
+    - ruff check sspcloud_mcp || true
+    - echo "== tests =="
+    - pytest tests/ -q
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_MERGE_REQUEST_ID'
