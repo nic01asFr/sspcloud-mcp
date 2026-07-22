@@ -83,9 +83,14 @@ URL du connecteur : https://user-VOTRE_USER-mcp.user.lab.sspcloud.fr/mcp
 Clé API (bearer)  : e0833472509c36472d0dd507b8a825f889bcacec…
 ```
 
+**Où trouver la clé API ?** Elle est générée par la commande ci-dessus et affichée dans le
+terminal (`Clé API (bearer) : …`). Elle est aussi écrite dans **`~/work/MCP_CONNEXION.txt`**
+(persistant : vous la retrouvez en rouvrant votre pod). La page OAuth ne la délivre pas —
+elle la **vérifie**.
+
 Puis, dans **Claude Desktop / mobile / claude.ai** → *Paramètres → Connecteurs → Ajouter un
-connecteur MCP* → coller l'**URL** ; au formulaire OAuth, saisir la **clé API**. Les 22 outils
-apparaissent.
+connecteur MCP* → coller l'**URL**. Claude ouvre alors le formulaire d'autorisation ci-dessous :
+collez-y la **clé API** récupérée à l'étape précédente. Les 22 outils apparaissent.
 
 ![Formulaire d'autorisation OAuth « Autoriser Claude »](img/04-oauth-authorize.png)
 
