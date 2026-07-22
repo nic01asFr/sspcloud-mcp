@@ -65,29 +65,35 @@ python -c "import sspcloud_mcp; print('installé', sspcloud_mcp.__version__)"
 
 ---
 
-## Étape 5 — Exposer le service et connecter votre agent
+## Étape 5 — Exposer le service en connecteur OAuth (self-service, 1 commande)
 
-Le serveur HTTP + **connecteur OAuth** est inclus (`sspcloud_mcp.server_http`, façon n8n).
-Dans le terminal du pod :
+**Une seule commande** dans le terminal du pod fait tout : installe le serveur, crée le
+**Service + Ingress** (URL publique propre) via le ServiceAccount du pod, génère la **clé
+API**, démarre le serveur avec un **watchdog** (survit aux redémarrages), et écrit vos
+infos de connexion dans `~/work/MCP_CONNEXION.txt`.
 
 ```bash
-# 1. Votre clé API (bearer) — c'est votre secret de connexion, gardez-la
-export PASSERELLE_MCP_BEARER=$(openssl rand -hex 24); echo "$PASSERELLE_MCP_BEARER"
-
-# 2. Lancer le serveur (écoute sur le port 8000)
-PASSERELLE_MCP_PUBLIC_URL="https://<URL-PUBLIQUE-DE-VOTRE-SERVICE>" PORT=8000 \
-  nohup python -m sspcloud_mcp.server_http > ~/work/mcp_http.log 2>&1 &
+curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/scripts/mcp_expose.sh | bash
 ```
 
-3. **Exposer le port 8000** publiquement : le service Jupyter doit avoir été lancé avec
-   *Network access* (`networking.user`) pointant sur le port **8000**.
-4. Dans **Claude Desktop / mobile** → *Ajouter un connecteur* → l'URL publique de votre
-   service. Le flux **OAuth** vous demande votre clé API (celle de l'étape 1).
+Sortie (exemple) :
 
-> **Note.** Exposer le port MCP proprement (sans masquer JupyterLab) est le plus simple via
-> le **chart catalogue dédié** (palier 1). En attendant, lancez un service *dédié* au MCP
-> avec le port réseau = 8000. Le code OAuth (DCR RFC 7591, PKCE) est complet ; cette section
-> sera enrichie de captures dès la validation live.
+```
+URL du connecteur : https://user-VOTRE_USER-mcp.user.lab.sspcloud.fr/mcp
+Clé API (bearer)  : e0833472509c36472d0dd507b8a825f889bcacec…
+```
+
+Puis, dans **Claude Desktop / mobile / claude.ai** → *Paramètres → Connecteurs → Ajouter un
+connecteur MCP* → coller l'**URL** ; au formulaire OAuth, saisir la **clé API**. Les 22 outils
+apparaissent.
+
+![Formulaire d'autorisation OAuth « Autoriser Claude »](img/04-oauth-authorize.png)
+
+> **Validé end-to-end** sur un compte `stsonly` : le SA du pod peut créer Service, Ingress,
+> Secret et piloter des pods. JupyterLab reste sur son URL (vous retrouvez votre terminal et
+> `MCP_CONNEXION.txt` en rouvrant le pod) ; le MCP a **sa propre URL** dédiée.
+>
+> Retirer le service : `kubectl delete service mcp-http ingress mcp-ingress -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)`
 
 ---
 

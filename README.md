@@ -27,6 +27,22 @@ depuis l'interface Onyxia, je ne peux pas le faire à ta place »*.
 
 ---
 
+## Modes d'utilisation — quel mode pour qui
+
+| Mode | Pour qui | Comment | Mobile |
+|---|---|---|---|
+| **Local (stdio)** | admin / power-user avec droits kubectl | `.mcp.json` → `sspcloud-mcp` sur le PC ([ONBOARDING](docs/ONBOARDING.md)) | non |
+| **Hébergé self-service** | **tout collègue** (même `stsonly`) | une commande dans un terminal de pod → connecteur OAuth ([INSTALL-IN-CLUSTER](docs/INSTALL-IN-CLUSTER.md)) | **oui** |
+
+- Le **local** est le plus rapide si vous avez déjà kubectl configuré (aucun pod à déployer).
+- L'**hébergé** est le mode « produit » : chacun lance **son** service dans **son** namespace,
+  exposé en HTTPS/OAuth, utilisable depuis Claude Desktop **et l'app mobile**. Aucun droit
+  kubectl côté PC requis (le pod agit avec son ServiceAccount).
+
+Même code (`sspcloud_mcp`) dans les deux cas — seule la façade change (stdio vs HTTP+OAuth).
+
+---
+
 ## En un coup d'œil
 
 ```
@@ -141,14 +157,15 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 
 ---
 
-## Référence des outils (21)
+## Référence des outils (22)
 
 **Sessions & exécution**
 | Outil | Rôle |
 |---|---|
 | `session_start` | Ouvre une session (attache un pod, URL publique, ou lance un pod). |
 | `session_status` | État d'une session / liste des sessions. |
-| `exec` | Exécute du code : `python` (kernel **stateful**) ou `bash` (shell). |
+| `exec` | Exécute du code : `python` (kernel **stateful**), `bash` (shell), ou `background=true` (détaché). |
+| `job_poll` | Suit un traitement lancé en `background` (running/terminé + log). |
 | `session_stop` | Ferme la session (option `uninstall` = supprime le pod). |
 
 **Code & fichiers**
@@ -208,13 +225,17 @@ Détails de conception : voir la note d'architecture d'origine dans le dépôt P
 
 ---
 
-## Feuille de route — connecteur MCP distant OAuth (V2)
+## Connecteur MCP distant OAuth — livré ✅
 
-Héberger le serveur **dans un pod SSPCloud** exposé en **connecteur MCP OAuth**
-(Streamable HTTP + OAuth 2.1 + DCR RFC 7591), déclarable dans Claude Desktop **et
-l'app mobile**. Les briques sont présentes (`server_http.py`, `oauth.py`, `start_mcp.py`).
-Bénéfice : le pod serveur porte un ServiceAccount RBAC (contourne `stsonly`) et joint les
-workers via le DNS interne (supprime la limite WS-ingress).
+Le serveur s'héberge **dans un pod SSPCloud**, exposé en **connecteur MCP OAuth**
+(Streamable HTTP + OAuth 2.1 + DCR RFC 7591), déclarable dans Claude Desktop **et l'app
+mobile**. Prouvé de bout en bout, y compris **self-service pour un compte `stsonly`** :
+une commande dans un terminal de pod crée Service + Ingress (via le ServiceAccount du pod),
+génère la clé API, démarre le serveur (avec **watchdog** de survie au reboot) et écrit la
+fiche de connexion. Voir **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)**.
+
+Scripts : `scripts/mcp_expose.sh` (install self-service), `scripts/mcp_watchdog.sh`
+(supervision), `scripts/personal_init.sh` (démarrage Onyxia `init.personalInit`).
 
 ---
 
