@@ -122,7 +122,11 @@ def copy_from_pod(pod: str, namespace: str, src: str,
 
 # ── Token Jupyter ─────────────────────────────────────────────────────────────
 
-_TOKEN_RE = re.compile(r"[?&]token=([0-9a-f]+)")
+# Un jeton Jupyter peut être hexadécimal, alphanumérique (ex. "ogf3274c9q…")
+# ou un placeholder Onyxia ("changeme"). On capture donc jusqu'au prochain
+# délimiteur (espace, & ou #), et non un simple sous-ensemble hexadécimal —
+# sinon "changeme" est tronqué en "c" et un jeton non-hex n'est pas reconnu.
+_TOKEN_RE = re.compile(r"[?&]token=([^\s&#]+)")
 
 
 def get_jupyter_token(pod: str, namespace: str) -> str:
