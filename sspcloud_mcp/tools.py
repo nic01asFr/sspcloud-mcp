@@ -292,6 +292,32 @@ async def service_warm(_mgr, args: dict) -> dict:
     return await D.service_warm(args["yaml_path"])
 
 
+async def expose_public(mgr, args: dict) -> dict:
+    """Expose un port du pod de la session à une URL HTTPS publique."""
+    sid = args.get("session_id")
+    if sid:
+        s = mgr.get(sid)
+        pod, ns = s.pod, s.namespace
+    else:
+        pod, ns = args.get("pod", ""), _ns(args)
+    if not pod:
+        raise MCPToolError("POD_REQUIRED", "session_id (ou pod) requis.",
+                           "expose_public(session_id=...) après session_start.")
+    return await D.expose_pod(pod, ns, port=int(args.get("port", 8000)),
+                              name=args.get("name", ""), path=args.get("path", "/"))
+
+
+async def unexpose_public(mgr, args: dict) -> dict:
+    """Retire l'exposition publique (Service + Ingress)."""
+    sid = args.get("session_id")
+    ns = mgr.get(sid).namespace if sid else _ns(args)
+    name = args.get("name") or (mgr.get(sid).pod if sid else "")
+    if not name:
+        raise MCPToolError("NAME_REQUIRED", "name ou session_id requis.",
+                           "Passez le même name qu'à expose_public.")
+    return await D.unexpose_pod(ns, name)
+
+
 # ── Registre : nom → (handler, description, schéma) ───────────────────────────
 
 def _s(props: dict, required: list[str]) -> dict:
@@ -414,4 +440,17 @@ TOOLS: dict = {
     "service_warm": (service_warm,
         "Préchauffe le pod GPU avant la première inférence.",
         _s({"yaml_path": _STR}, ["yaml_path"])),
+
+    "expose_public": (expose_public,
+        "Expose un port du pod de la session à une URL HTTPS publique (Service + "
+        "Ingress onyxia via le ServiceAccount du pod, comme les pods bridge). Sert "
+        "à publier une app/PWA/démo lancée dans le pod — retourne l'URL. Défaut "
+        "port=8000 ; name = sous-domaine (défaut dérivé du pod).",
+        _s({"session_id": _STR, "pod": _STR, "namespace": _STR, "port": _INT,
+            "name": _STR, "path": _STR}, [])),
+
+    "unexpose_public": (unexpose_public,
+        "Retire l'exposition publique créée par expose_public (supprime Service + "
+        "Ingress). Passez le même name (ou session_id) qu'à l'exposition.",
+        _s({"session_id": _STR, "name": _STR, "namespace": _STR}, [])),
 }

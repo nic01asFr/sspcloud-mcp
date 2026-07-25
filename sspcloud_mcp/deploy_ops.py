@@ -128,6 +128,94 @@ async def list_pods(namespace: str = "", name_filter: str = "") -> dict:
     return {"namespace": ns, "pods": pods, "statefulsets": releases, "count": len(pods)}
 
 
+import re as _re
+
+
+def _expose_slug(s: str) -> str:
+    """Slug DNS-safe pour le sous-domaine et les noms de ressources."""
+    s = _re.sub(r"-jupyter-python-0$|-0$", "", s)
+    s = _re.sub(r"[^a-z0-9-]+", "-", s.lower()).strip("-")
+    return (s[:40].strip("-") or "app")
+
+
+async def expose_pod(pod: str, namespace: str, port: int = 8000,
+                     name: str = "", path: str = "/") -> dict:
+    """Expose un port d'un pod en URL HTTPS publique.
+
+    Crée un Service (sélecteur = pod) + un Ingress classe `onyxia` (TLS auto via
+    le wildcard `*.user.lab.sspcloud.fr`), via le ServiceAccount du pod — sans
+    passer par le portail Onyxia. C'est le patron des pods « bridge » existants.
+    """
+    slug = _expose_slug(name or pod)
+    host = f"{namespace}-{slug}.user.lab.sspcloud.fr"
+    svc, ing = f"{slug}-svc", f"{slug}-ingress"
+    path = path or "/"
+    manifest = f"""apiVersion: v1
+kind: Service
+metadata:
+  name: {svc}
+  labels:
+    app.kubernetes.io/managed-by: sspcloud-mcp
+spec:
+  selector:
+    statefulset.kubernetes.io/pod-name: {pod}
+  ports:
+  - port: {port}
+    targetPort: {port}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {ing}
+  labels:
+    app.kubernetes.io/managed-by: sspcloud-mcp
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: onyxia
+  rules:
+  - host: {host}
+    http:
+      paths:
+      - backend:
+          service:
+            name: {svc}
+            port:
+              number: {port}
+        path: {path}
+        pathType: Prefix
+  tls:
+  - hosts:
+    - {host}
+"""
+    loop = asyncio.get_event_loop()
+    rc, out, err = await loop.run_in_executor(
+        None, lambda: T.kubectl("apply", "-f", "-", namespace=namespace,
+                                input_text=manifest, timeout=60))
+    T._raise_if_forbidden(rc, err)
+    if rc != 0:
+        raise MCPToolError("EXPOSE_FAILED", (err or out).strip()[:200] or
+                           "kubectl apply échoué",
+                           "Le SA du pod doit avoir le rôle Onyxia edit.")
+    return {"url": f"https://{host}{path}", "host": host, "port": port,
+            "service": svc, "ingress": ing,
+            "note": "Propagation ingress ~10-30 s. unexpose_public pour retirer."}
+
+
+async def unexpose_pod(namespace: str, name: str) -> dict:
+    """Retire l'exposition publique créée par expose_pod (Service + Ingress)."""
+    slug = _expose_slug(name)
+    loop = asyncio.get_event_loop()
+    rc, out, err = await loop.run_in_executor(
+        None, lambda: T.kubectl("delete", "service", f"{slug}-svc",
+                                "ingress", f"{slug}-ingress",
+                                "--ignore-not-found",
+                                namespace=namespace, timeout=40))
+    T._raise_if_forbidden(rc, err)
+    return {"removed": rc == 0, "detail": (out or err).strip()[:200]}
+
+
 async def provision_service(yaml_path: str, *, packages: str = "",
                             models: list | None = None,
                             subdirs: str = "core,api") -> dict:

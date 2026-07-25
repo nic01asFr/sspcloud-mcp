@@ -157,7 +157,7 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 
 ---
 
-## Référence des outils (22)
+## Référence des outils (24)
 
 **Sessions & exécution**
 | Outil | Rôle |
@@ -188,6 +188,12 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 | `project_start` | Lance un pod dédié pour un projet (CPU ou GPU). |
 | `project_bind` | Attache une session à un pod existant (nom ou filtre projet). |
 | `list_pods` | Liste les pods / statefulsets du namespace. |
+
+**Exposition HTTPS publique**
+| Outil | Rôle |
+|---|---|
+| `expose_public` | Publie un port du pod (app / PWA / démo) à une URL HTTPS — crée Service + Ingress `onyxia` via le ServiceAccount du pod. Retourne l'URL. |
+| `unexpose_public` | Retire l'exposition (supprime Service + Ingress). |
 
 **Déploiement de services** *(extra `[service]`)*
 | Outil | Rôle |

@@ -12,12 +12,13 @@ def test_version():
 
 
 def test_tools_registry():
-    assert len(TOOLS) == 22
+    assert len(TOOLS) == 24
     for name, (handler, desc, schema) in TOOLS.items():
         assert callable(handler), name
         assert isinstance(desc, str) and desc, name
         assert schema["type"] == "object", name
-    for core in ("session_start", "exec", "job_poll", "push_repo", "gpu_switch"):
+    for core in ("session_start", "exec", "job_poll", "push_repo", "gpu_switch",
+                 "expose_public", "unexpose_public"):
         assert core in TOOLS
 
 
