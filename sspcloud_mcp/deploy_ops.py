@@ -207,9 +207,11 @@ async def unexpose_pod(namespace: str, name: str) -> dict:
     """Retire l'exposition publique créée par expose_pod (Service + Ingress)."""
     slug = _expose_slug(name)
     loop = asyncio.get_event_loop()
+    # Notation type/nom obligatoire : « delete service a ingress b » serait lu
+    # comme trois *services* (a, ingress, b) et laisserait l'Ingress en place.
     rc, out, err = await loop.run_in_executor(
-        None, lambda: T.kubectl("delete", "service", f"{slug}-svc",
-                                "ingress", f"{slug}-ingress",
+        None, lambda: T.kubectl("delete", f"service/{slug}-svc",
+                                f"ingress/{slug}-ingress",
                                 "--ignore-not-found",
                                 namespace=namespace, timeout=40))
     T._raise_if_forbidden(rc, err)
