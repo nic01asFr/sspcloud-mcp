@@ -64,12 +64,21 @@ class _Handler(BaseHTTPRequestHandler):
         token = auth[7:]
         return oauth.validate_token(token)
 
+    def _cors(self) -> None:
+        # Le flux OAuth de claude.ai s'exécute DANS le navigateur (cross-origin
+        # claude.ai → ce serveur). Sans ces en-têtes, le navigateur bloque la
+        # découverte et l'inscription DCR ("impossible de s'inscrire").
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Expose-Headers",
+                         "Mcp-Session-Id, WWW-Authenticate")
+
     def _send(self, code: int, body: bytes = b"",
               ctype: str = "application/json", extra: dict | None = None):
         hdrs = dict(extra or {})
         if "Content-Type" in hdrs:
             ctype = hdrs.pop("Content-Type")
         self.send_response(code)
+        self._cors()
         if body:
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
@@ -78,6 +87,33 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if body:
             self.wfile.write(body)
+
+    def _unauthorized(self):
+        # 401 + indice de découverte OAuth (RFC 9728) : pointe claude.ai vers les
+        # métadonnées de la ressource protégée.
+        extra = {}
+        if _OAUTH:
+            try:
+                base = oauth.metadata().get("issuer", "")
+                if base:
+                    extra["WWW-Authenticate"] = (
+                        f'Bearer resource_metadata='
+                        f'"{base}/.well-known/oauth-protected-resource"')
+            except Exception:
+                pass
+        self._send(401, b'{"error":"unauthorized"}', extra=extra)
+
+    def do_OPTIONS(self):
+        # Préflight CORS : autoriser toutes les méthodes/headers utilisés par MCP.
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "Authorization, Content-Type, Mcp-Session-Id, "
+                         "Mcp-Protocol-Version, mcp-session-id")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, *a):        # silence stdout (réservé au protocole)
         pass
@@ -106,10 +142,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path.rstrip("/") == "/mcp":
             if not self._authorized():
-                self._send(401, b'{"error":"unauthorized"}')
+                self._unauthorized()
                 return
             # SSE : flux ouvert, keepalive. Les réponses passent par POST.
             self.send_response(200)
+            self._cors()
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
@@ -154,7 +191,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, b'{"error":"not found"}')
             return
         if not self._authorized():
-            self._send(401, b'{"error":"unauthorized"}')
+            self._unauthorized()
             return
         try:
             raw = self._read_body()
