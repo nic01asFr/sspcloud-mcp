@@ -40,6 +40,7 @@ CHART="$TMP/src/charts/sspcloud-mcp"
 echo "[--] helm upgrade --install $NAME ..."
 helm upgrade --install "$NAME" "$CHART" \
   --namespace "$NS" \
+  --set "fullnameOverride=$NAME" \
   --set "app.host=$HOST" \
   --set "app.ref=$REF" \
   --set "onyxia_user=$IDEP" \

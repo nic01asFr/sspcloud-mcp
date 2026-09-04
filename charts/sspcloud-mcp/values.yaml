@@ -11,6 +11,12 @@ image:
   tag: "py3.13.13"
   pullPolicy: IfNotPresent
 
+# Noms de ressources. fullnameOverride force le nom exact des ressources
+# (Deployment/Service/Ingress/Secret) — l'install CLI y met le nom du service pour
+# des noms prévisibles. Vide = <release>-sspcloud-mcp (défaut Helm, voie catalogue).
+nameOverride: ""
+fullnameOverride: ""
+
 # --- Identité Onyxia -----------------------------------------------------------
 onyxia:
   friendlyName: "SSPCloud MCP — Agent Compute"
