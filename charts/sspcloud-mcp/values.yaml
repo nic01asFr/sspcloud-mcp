@@ -1,0 +1,96 @@
+# Valeurs par défaut du chart sspcloud-mcp (Onyxia SSPCloud, self-hosted par-user).
+# Le serveur MCP est stateless (sessions in-memory) : pas de PVC.
+# Aucun secret n'est commité ici ; le bearer naît dans le namespace du user.
+
+# --- Image ---------------------------------------------------------------------
+# On réutilise l'image Jupyter officielle (kubectl + helm + python inclus) et on
+# installe sspcloud_mcp au démarrage (pip). Aucune image dédiée à construire →
+# aucun registre conteneur requis. Démarrage ~30 s (pip), une fois par (re)start.
+image:
+  repository: inseefrlab/onyxia-jupyter-python
+  tag: "py3.13.13"
+  pullPolicy: IfNotPresent
+
+# --- Identité Onyxia -----------------------------------------------------------
+onyxia:
+  friendlyName: "SSPCloud MCP — Agent Compute"
+
+# ONYXIA_USER est renseigné automatiquement par Onyxia (values.schema.json).
+onyxia_user: ""
+
+# --- Serveur MCP ---------------------------------------------------------------
+app:
+  # Hostname public (surchargé par Onyxia, cf. values.schema.json).
+  host: ""
+  port: 8000
+  # Source pip du serveur : dépôt public + ref (branche/tag). Réécrit possible.
+  repoUrl: "https://gitlab.cerema.fr/mcp/sspcloud_mcp.git"
+  ref: "main"
+
+# --- Garde Bearer du pod (auto-générée) ----------------------------------------
+# Le chart crée son propre Secret avec un PASSERELLE_MCP_BEARER aléatoire stable
+# (helper lookup → conservé entre upgrades, jamais connu de l'auteur du chart).
+# Exigé sur /mcp, /register, SSE. Les clients MCP le portent via Authorization.
+appAuth:
+  token: ""  # vide = généré aléatoirement (48 char), stable au prochain upgrade
+
+# --- RBAC (piloter les pods de travail + lire les tokens Jupyter) --------------
+# Le serveur MCP a besoin de kubectl/helm pour lancer et piloter des pods de
+# travail (launch_chart, gpu_switch, exec). On crée un ServiceAccount dédié + un
+# RoleBinding vers la ClusterRole 'edit' (existante). RoleBinding vers une
+# ClusterRole EXISTANTE est autorisé en namespace utilisateur SSPCloud (≠ créer
+# une Role). Lancé depuis le catalogue, Onyxia crée ce binding automatiquement.
+rbac:
+  create: true
+  clusterRole: edit
+
+# ServiceAccount à réutiliser QUAND rbac.create=false (voie install CLI depuis un
+# pod : un pod utilisateur ne peut pas créer de RoleBinding, même vers 'edit' —
+# mesuré Forbidden). L'install.sh y met le SA du pod courant (rôle edit). Le
+# catalogue laisse rbac.create=true (Onyxia crée le SA + binding lui-même).
+serviceAccount:
+  name: ""
+
+# --- Ressources ----------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi
+
+# --- Répliques (sessions in-memory : garder 1) ---------------------------------
+replicaCount: 1
+
+# --- Service -------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8000
+
+# --- Ingress (classe onyxia = TLS auto via le wildcard *.user.lab.sspcloud.fr) -
+ingress:
+  enabled: true
+  className: onyxia
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # SSE : pas de buffering pour le flux d'événements du connecteur.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+# --- Probes (/health est public, pas de Bearer) --------------------------------
+probes:
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 25
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 90
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3

@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "app": {
+      "type": "object",
+      "title": "Serveur MCP",
+      "description": "Paramètres du serveur MCP Agent Compute.",
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "Domaine public",
+          "description": "Hostname public du serveur (TLS auto). Renseigné par Onyxia.",
+          "default": "",
+          "x-onyxia": {
+            "overwriteDefaultWith": "user-{{user.idep}}-sspcloud-mcp.user.lab.sspcloud.fr"
+          }
+        },
+        "ref": {
+          "type": "string",
+          "title": "Version du serveur (branche ou tag)",
+          "description": "Ref git de sspcloud_mcp installée au démarrage.",
+          "default": "main"
+        }
+      }
+    },
+    "onyxia_user": {
+      "type": "string",
+      "title": "Identifiant Onyxia",
+      "description": "Renseigné automatiquement.",
+      "default": "",
+      "x-onyxia": {
+        "overwriteDefaultWith": "{{user.idep}}"
+      }
+    },
+    "appAuth": {
+      "type": "object",
+      "title": "Clé API (Bearer)",
+      "properties": {
+        "token": {
+          "type": "string",
+          "title": "Clé API imposée (optionnelle)",
+          "description": "Laisser vide pour une génération aléatoire stable (48 car.). Reste dans votre namespace.",
+          "default": "",
+          "render": "password"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "title": "Ressources",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string", "title": "CPU", "default": "100m" },
+            "memory": { "type": "string", "title": "RAM", "default": "512Mi" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string", "title": "CPU max", "default": "1" },
+            "memory": { "type": "string", "title": "RAM max", "default": "2Gi" }
+          }
+        }
+      }
+    }
+  }
+}

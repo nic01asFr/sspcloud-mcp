@@ -1,0 +1,36 @@
+### SSPCloud MCP — Agent Compute déployé
+
+Votre serveur MCP tourne comme Deployment Kubernetes : **redémarrage automatique,
+jamais auto-suspendu**. Il survit à la fermeture de vos pods Jupyter.
+
+**1. URL du connecteur** (à coller dans Claude) :
+
+  `https://{{ .Values.app.host }}/mcp`
+
+**2. Récupérer votre clé API (Bearer)** — jamais connue de l'auteur du chart :
+
+  `kubectl get secret {{ include "sspcloud-mcp.fullname" . }} -o jsonpath='{.data.PASSERELLE_MCP_BEARER}' | base64 -d ; echo`
+
+**3. Connecter Claude** — deux chemins :
+
+  (a) **Connecteur OAuth** (Claude Desktop / mobile / claude.ai) : Paramètres →
+      Connecteurs → Ajouter un connecteur MCP → collez l'URL ci-dessus. Au
+      formulaire d'autorisation, saisissez la clé de l'étape 2.
+
+  (b) **Header statique** (Claude Code, `.mcp.json`) :
+
+      {
+        "mcpServers": {
+          "sspcloud-mcp": {
+            "type": "http",
+            "url": "https://{{ .Values.app.host }}/mcp",
+            "headers": { "Authorization": "Bearer <clé de l'étape 2>" }
+          }
+        }
+      }
+
+**Health** : `https://{{ .Values.app.host }}/health`
+
+Pour arrêter : supprimez ce service depuis « Mes services », ou
+`helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}`
+(votre clé Bearer est conservée pour un redéploiement — annotation resource-policy: keep).

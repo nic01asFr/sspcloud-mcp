@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sspcloud-mcp.fullname" . }}
+  labels:
+    {{- include "sspcloud-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sspcloud-mcp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sspcloud-mcp.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Force le redéploiement si le Secret (bearer) change.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- if .Values.rbac.create }}
+      serviceAccountName: {{ include "sspcloud-mcp.fullname" . }}
+      {{- else if .Values.serviceAccount.name }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Le serveur EST le process principal (PID 1 du conteneur) → jamais
+          # fauché par le cull des terminaux ni l'auto-suspension d'un service
+          # interactif. On installe sspcloud_mcp au démarrage puis exec le serveur.
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              pip install --quiet "git+{{ .Values.app.repoUrl }}@{{ .Values.app.ref }}" 2>/dev/null \
+                || pip install --quiet --user "git+{{ .Values.app.repoUrl }}@{{ .Values.app.ref }}" 2>/dev/null || true
+              exec /opt/python/bin/python -m sspcloud_mcp.server_http
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.app.port | quote }}
+            - name: SSPCLOUD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ONYXIA_USER
+              value: {{ .Values.onyxia_user | quote }}
+            - name: PASSERELLE_MCP_PUBLIC_URL
+              value: "https://{{ .Values.app.host }}"
+            - name: PASSERELLE_MCP_BEARER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sspcloud-mcp.fullname" . }}
+                  key: PASSERELLE_MCP_BEARER
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}

@@ -1,0 +1,28 @@
+{{- if .Values.rbac.create }}
+# ServiceAccount dédié au pod + RoleBinding vers la ClusterRole 'edit' (existante),
+# pour que le serveur MCP puisse piloter des pods de travail (lancer, exec, GPU) et
+# lire leurs tokens Jupyter. Bind vers une ClusterRole EXISTANTE est autorisé en
+# namespace utilisateur SSPCloud (≠ créer une Role). Créé par Onyxia à l'install
+# depuis le catalogue.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "sspcloud-mcp.fullname" . }}
+  labels:
+    {{- include "sspcloud-mcp.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sspcloud-mcp.fullname" . }}-{{ .Values.rbac.clusterRole }}
+  labels:
+    {{- include "sspcloud-mcp.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.rbac.clusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sspcloud-mcp.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: sspcloud-mcp
+description: >-
+  Agent Compute — serveur MCP durable qui donne à un assistant IA (Claude Desktop,
+  Code, mobile) un poste de calcul distant sur SSPCloud : exécuter du code, piloter
+  le GPU, des notebooks à état persistant, déployer des services. Connecteur OAuth.
+type: application
+# Version du chart (incrémentée à chaque changement de packaging).
+version: 0.3.0
+# Version applicative (= version de sspcloud_mcp installé dans le pod).
+appVersion: "0.3.0"
+icon: https://raw.githubusercontent.com/InseeFrLab/onyxia/main/web/public/favicon.svg
+keywords:
+  - mcp
+  - sspcloud
+  - onyxia
+  - agent
+  - compute
+home: https://gitlab.cerema.fr/mcp/sspcloud_mcp
+maintainers:
+  - name: CEREMA
