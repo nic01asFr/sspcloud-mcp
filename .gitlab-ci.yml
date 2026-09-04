@@ -1,5 +1,6 @@
 stages:
   - test
+  - publish
 
 # Lint + tests unitaires (aucun cluster requis).
 # Le cœur s'installe sans l'extra [service] (les imports passerelle sont lazy).
@@ -18,3 +19,27 @@ test:
   rules:
     - if: '$CI_COMMIT_BRANCH'
     - if: '$CI_MERGE_REQUEST_ID'
+
+# Publie le chart Helm dans le registre Helm intégré du projet GitLab
+# (channel "stable"). L'URL du repo pour les consommateurs est ensuite :
+#   https://gitlab.cerema.fr/api/v4/projects/<CI_PROJECT_ID>/packages/helm/stable
+# NB : republier exige de bumper `version:` dans charts/sspcloud-mcp/Chart.yaml.
+publish-chart:
+  stage: publish
+  image: alpine/helm:3.16.2
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - helm lint charts/sspcloud-mcp
+    - helm package charts/sspcloud-mcp -d /tmp
+    - CHART_TGZ=$(ls /tmp/sspcloud-mcp-*.tgz)
+    - echo "Publication de $CHART_TGZ vers le registre Helm du projet $CI_PROJECT_ID"
+    - |
+      curl --fail-with-body --request POST \
+        --user "gitlab-ci-token:${CI_JOB_TOKEN}" \
+        --form "chart=@${CHART_TGZ}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/helm/api/stable/charts"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - charts/sspcloud-mcp/**/*

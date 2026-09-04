@@ -148,7 +148,7 @@ Si `session_start` renvoie votre pod et `exec` affiche `42`, c'est opérationnel
 ## Étape 6 — Utiliser
 
 Voir le [GUIDE](GUIDE.md) pour les workflows (dev CPU, entraînement GPU avec bascule de
-slot, déploiement de service) et le [README](../README.md) pour la référence des 22 outils.
+slot, déploiement de service) et le [README](../README.md) pour la référence des 24 outils.
 
 Boucle type :
 

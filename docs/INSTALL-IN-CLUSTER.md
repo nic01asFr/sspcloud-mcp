@@ -43,37 +43,30 @@ identifiants — vous n'en avez pas besoin, cliquez pour ouvrir). Dans JupyterLa
 
 ---
 
-## Étape 4 — Installer le service (une commande)
+## Étape 4 — Vérifier le rôle du pod (`edit`)
 
-Dans le terminal :
-
-```bash
-pip install "git+https://gitlab.cerema.fr/mcp/sspcloud_mcp.git"
-```
-
-> Si le dépôt est privé, ajoutez un token de lecture :
-> `pip install "git+https://oauth2:<VOTRE_TOKEN>@gitlab.cerema.fr/mcp/sspcloud_mcp.git"`
-
-Vérifier :
+L'installation crée un Deployment → le pod doit avoir le rôle Kubernetes **`edit`**
+(choisi **au lancement du service** depuis le portail). Vérifiez dans le terminal :
 
 ```bash
-python -c "import sspcloud_mcp; print('installé', sspcloud_mcp.__version__)"
+kubectl auth can-i create deployment -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 ```
 
-À partir de là, le service peut, **depuis votre pod**, lancer et piloter des workers
-(dev/GPU) **dans votre namespace** — validé end-to-end (self-drive + lancement de worker).
+Si la réponse est **`no`**, votre pod est en `view` : relancez un service Jupyter/VSCode
+depuis le portail en réglant **Kubernetes → rôle = `edit`**. (Un pod lancé par le MCP a le
+rôle `view` par défaut.)
 
 ---
 
-## Étape 5 — Exposer le service en connecteur OAuth (self-service, 1 commande)
+## Étape 5 — Installer le service DURABLE (une commande)
 
-**Une seule commande** dans le terminal du pod fait tout : installe le serveur, crée le
-**Service + Ingress** (URL publique propre) via le ServiceAccount du pod, génère la **clé
-API**, démarre le serveur avec un **watchdog** (survit aux redémarrages), et écrit vos
-infos de connexion dans `~/work/MCP_CONNEXION.txt`.
+**Une seule commande** déploie le serveur comme **Deployment Kubernetes** : il devient le
+process principal d'un pod géré par K8s → **redémarrage automatique, jamais auto-suspendu,
+survit à la fermeture de vos pods Jupyter**. Elle crée le Service + Ingress (URL propre),
+génère la **clé API** stable, et affiche vos infos de connexion.
 
 ```bash
-curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/scripts/mcp_expose.sh | bash
+curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/charts/sspcloud-mcp/scripts/install.sh | bash
 ```
 
 Sortie (exemple) :
@@ -83,22 +76,26 @@ URL du connecteur : https://user-VOTRE_USER-mcp.user.lab.sspcloud.fr/mcp
 Clé API (bearer)  : e0833472509c36472d0dd507b8a825f889bcacec…
 ```
 
-**Où trouver la clé API ?** Elle est générée par la commande ci-dessus et affichée dans le
-terminal (`Clé API (bearer) : …`). Elle est aussi écrite dans **`~/work/MCP_CONNEXION.txt`**
-(persistant : vous la retrouvez en rouvrant votre pod). La page OAuth ne la délivre pas —
-elle la **vérifie**.
+**Où retrouver la clé API ?** Affichée par la commande, et récupérable à tout moment :
+`kubectl get secret mcp -o jsonpath='{.data.PASSERELLE_MCP_BEARER}' | base64 -d ; echo`.
+La page OAuth ne la délivre pas — elle la **vérifie**.
 
 Puis, dans **Claude Desktop / mobile / claude.ai** → *Paramètres → Connecteurs → Ajouter un
-connecteur MCP* → coller l'**URL**. Claude ouvre alors le formulaire d'autorisation ci-dessous :
-collez-y la **clé API** récupérée à l'étape précédente. Les 22 outils apparaissent.
+connecteur MCP* → coller l'**URL**. Claude ouvre le formulaire d'autorisation ci-dessous :
+collez-y la **clé API**. Les **24 outils** apparaissent.
 
 ![Formulaire d'autorisation OAuth « Autoriser Claude »](img/04-oauth-authorize.png)
 
-> **Validé end-to-end** sur un compte `stsonly` : le SA du pod peut créer Service, Ingress,
-> Secret et piloter des pods. JupyterLab reste sur son URL (vous retrouvez votre terminal et
-> `MCP_CONNEXION.txt` en rouvrant le pod) ; le MCP a **sa propre URL** dédiée.
+> **Encore plus simple (à venir) :** une fois le chart publié et le catalogue ajouté dans
+> Onyxia, l'installation se fait **en un clic** depuis le catalogue (le service apparaît alors
+> nativement dans « Mes services »). Voir la note du dépôt sur le chart `charts/sspcloud-mcp/`.
 >
-> Retirer le service : `kubectl delete service mcp-http ingress mcp-ingress -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)`
+> Mettre à jour le code : `kubectl rollout restart deployment/mcp -n <ns>` (la clé est
+> conservée). Retirer : `helm uninstall mcp -n <ns>` ou depuis « Mes services ».
+
+> **Dépannage rapide (non durable) :** `scripts/mcp_expose.sh` lance le serveur dans le
+> terminal — pratique pour un test ponctuel, mais il **tombe en ~10 min** (fermeture des
+> terminaux Jupyter / auto-suspension). Préférez toujours `install.sh` ci-dessus.
 
 ---
 

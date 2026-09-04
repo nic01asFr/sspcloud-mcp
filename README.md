@@ -31,15 +31,17 @@ depuis l'interface Onyxia, je ne peux pas le faire à ta place »*.
 
 | Mode | Pour qui | Comment | Mobile |
 |---|---|---|---|
+| **Hébergé durable** (recommandé) | **tout collègue** | catalogue Onyxia en un clic, ou `install.sh` depuis un pod `edit` → connecteur OAuth ([INSTALL-IN-CLUSTER](docs/INSTALL-IN-CLUSTER.md)) | **oui** |
 | **Local (stdio)** | admin / power-user avec droits kubectl | `.mcp.json` → `sspcloud-mcp` sur le PC ([ONBOARDING](docs/ONBOARDING.md)) | non |
-| **Hébergé self-service** | **tout collègue** (même `stsonly`) | une commande dans un terminal de pod → connecteur OAuth ([INSTALL-IN-CLUSTER](docs/INSTALL-IN-CLUSTER.md)) | **oui** |
 
+- L'**hébergé durable** est le mode « produit » : chacun lance **son** service dans **son**
+  namespace, comme **Deployment** (redémarrage auto, jamais auto-suspendu), exposé en
+  HTTPS/OAuth, utilisable depuis Claude Desktop **et l'app mobile**. Le serveur agit avec un
+  ServiceAccount `edit` ; aucun droit kubectl côté PC requis.
 - Le **local** est le plus rapide si vous avez déjà kubectl configuré (aucun pod à déployer).
-- L'**hébergé** est le mode « produit » : chacun lance **son** service dans **son** namespace,
-  exposé en HTTPS/OAuth, utilisable depuis Claude Desktop **et l'app mobile**. Aucun droit
-  kubectl côté PC requis (le pod agit avec son ServiceAccount).
 
 Même code (`sspcloud_mcp`) dans les deux cas — seule la façade change (stdio vs HTTP+OAuth).
+Agent IA qui installe avec vous : voir **[AGENTS.md](AGENTS.md)**.
 
 ---
 
@@ -231,17 +233,23 @@ Détails de conception : voir la note d'architecture d'origine dans le dépôt P
 
 ---
 
-## Connecteur MCP distant OAuth — livré ✅
+## Hébergement durable + connecteur OAuth — livré ✅
 
-Le serveur s'héberge **dans un pod SSPCloud**, exposé en **connecteur MCP OAuth**
-(Streamable HTTP + OAuth 2.1 + DCR RFC 7591), déclarable dans Claude Desktop **et l'app
-mobile**. Prouvé de bout en bout, y compris **self-service pour un compte `stsonly`** :
-une commande dans un terminal de pod crée Service + Ingress (via le ServiceAccount du pod),
-génère la clé API, démarre le serveur (avec **watchdog** de survie au reboot) et écrit la
-fiche de connexion. Voir **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)**.
+Le serveur s'héberge **dans le namespace SSPCloud de l'utilisateur** comme **Deployment
+Kubernetes** (process principal du pod) : **redémarrage automatique, jamais auto-suspendu,
+survit à la fermeture des pods Jupyter**. Exposé en **connecteur MCP OAuth** (Streamable
+HTTP + OAuth 2.1 + DCR RFC 7591 + PKCE, **CORS** pour le flux navigateur de claude.ai),
+déclarable dans Claude Desktop **et l'app mobile**.
 
-Scripts : `scripts/mcp_expose.sh` (install self-service), `scripts/mcp_watchdog.sh`
-(supervision), `scripts/personal_init.sh` (démarrage Onyxia `init.personalInit`).
+Deux voies d'installation :
+- **Catalogue Onyxia** (recommandé, **un clic**) — chart `charts/sspcloud-mcp/` : Onyxia
+  crée SA dédié + RoleBinding `edit`, et le service apparaît dans **« Mes services »**.
+- **CLI** — `charts/sspcloud-mcp/scripts/install.sh` (ou `scripts/mcp_deploy.sh`) depuis un
+  pod lancé en `kubernetes.role: edit`. Voir **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)**
+  et **[AGENTS.md](AGENTS.md)** (install pilotée par un agent IA).
+
+> `scripts/mcp_expose.sh` (lancement dans le terminal) reste pour un **test rapide**, mais
+> il est **fragile** (tombe en ~10 min) — préférez la voie durable ci-dessus.
 
 ---
 
