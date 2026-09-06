@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSPCloud MCP — un poste de calcul SSPCloud piloté par votre assistant IA</title>
+<meta name="description" content="Serveur MCP qui donne à un assistant IA (Claude) un poste de calcul distant sur SSPCloud : exécuter du code, GPU, notebooks à état, déployer des services. Durable, sécurisé, natif Onyxia.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="./">
+      <svg class="logo" viewBox="0 0 40 40" style="color:var(--accent-light)" aria-hidden="true">
+        <g fill="currentColor">
+          <path d="M20 2 L28 10 L20 18 L12 10 Z"/>
+          <path d="M10 12 L18 20 L10 28 L2 20 Z"/>
+          <path d="M30 12 L38 20 L30 28 L22 20 Z"/>
+          <path d="M20 22 L28 30 L20 38 L12 30 Z"/>
+        </g>
+      </svg>
+      <span style="color:var(--muted);font-weight:600">SSPCloud</span>&nbsp;<b>MCP</b>
+    </a>
+    <span class="spacer"></span>
+    <a class="navlink hide-sm" href="#fonctions">Fonctions</a>
+    <a class="navlink hide-sm" href="#installer">Installer</a>
+    <a class="navlink" href="https://gitlab.cerema.fr/mcp/sspcloud_mcp">GitLab</a>
+    <span class="lang">FR · <a href="en/">EN</a></span>
+  </div>
+</header>
+
+<main>
+  <!-- Hero -->
+  <section class="hero"><div class="wrap">
+    <div class="badges">
+      <span class="badge">MCP</span>
+      <span class="badge">SSPCloud · Onyxia</span>
+      <span class="badge">OAuth 2.1 · PKCE</span>
+      <span class="badge">GPU</span>
+      <span class="badge">Open source</span>
+    </div>
+    <h1>Un poste de calcul SSPCloud, piloté par votre assistant IA.</h1>
+    <p class="lead">
+      <b>SSPCloud MCP</b> donne à Claude (Desktop, mobile, Code) un poste de travail distant
+      sur le datalab : pousser un dépôt, <b>exécuter du code</b>, exploiter le <b>GPU</b>, des
+      <b>notebooks à état persistant</b>, et <b>déployer des services</b> — le tout depuis la
+      conversation, dans <b>votre</b> namespace.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#installer">Installer le service</a>
+      <a class="btn btn-ghost" href="https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/blob/main/AGENTS.md">Installer avec un agent IA</a>
+    </div>
+    <div class="codeblock">
+<span class="c"># Dans un terminal d'un service SSPCloud lancé en rôle « edit »</span>
+curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/charts/sspcloud-mcp/scripts/install.sh | bash
+    </div>
+  </div></section>
+
+  <!-- Problème -->
+  <section class="block"><div class="wrap">
+    <h2>Le problème</h2>
+    <p class="sub">
+      Un assistant IA sait écrire du code, mais pas l'exécuter sur une vraie machine. Dès qu'il
+      faut un GPU, un notebook ou un traitement lourd, la conversation s'arrête sur un
+      <em>« lancez-le vous-même depuis l'interface »</em>. Le datalab SSPCloud offre pourtant du
+      calcul gratuit — il manquait le pont.
+    </p>
+  </div></section>
+
+  <!-- Fonctions -->
+  <section class="block" id="fonctions"><div class="wrap">
+    <h2>Ce que ça fait</h2>
+    <p class="sub">Deux verbes, à distance, sur la vraie infra du datalab.</p>
+    <div class="grid">
+      <div class="card"><div class="ic">▶</div><h3>Exécuter du code</h3>
+        <p>Kernel Python à <b>état persistant</b> (variables, modèle GPU en mémoire) + shell : git, pip, pytest dans le pod.</p></div>
+      <div class="card"><div class="ic">◆</div><h3>GPU arbitré</h3>
+        <p>Un slot GPU par utilisateur, bascule par projet avec préemption ; l'environnement de chaque projet préservé (PVC).</p></div>
+      <div class="card"><div class="ic">≣</div><h3>Notebooks complets</h3>
+        <p>Créer, exécuter, itérer un <code>.ipynb</code> ; le collègue rouvre le même fichier dans son JupyterLab.</p></div>
+      <div class="card"><div class="ic">↥</div><h3>Déployer un service</h3>
+        <p>Exposer une API ou une démo en HTTPS depuis la conversation. 24 outils MCP au total.</p></div>
+    </div>
+  </div></section>
+
+  <!-- Durable & sécurisé -->
+  <section class="block"><div class="wrap">
+    <h2>Durable &amp; sécurisé</h2>
+    <p class="sub">Un service « produit », pas un bricolage qui tombe.</p>
+    <div class="grid">
+      <div class="card"><div class="ic">∞</div><h3>Durable</h3>
+        <p>Le serveur est le process principal d'un <b>Deployment Kubernetes</b> : redémarrage automatique, <span class="pill-ok">jamais auto-suspendu</span>, survit à la fermeture des pods.</p></div>
+      <div class="card"><div class="ic">⚿</div><h3>OAuth navigateur</h3>
+        <p>Connecteur MCP <b>OAuth 2.1 + DCR + PKCE</b> (avec CORS) pour Claude Desktop, mobile et claude.ai. Ou header statique pour Claude Code / Cursor.</p></div>
+      <div class="card"><div class="ic">◱</div><h3>Mono-namespace</h3>
+        <p>Chacun installe <b>son</b> service dans <b>son</b> namespace. Clé bearer auto-générée, jamais connue de l'auteur. Aucun accès aux données d'autrui.</p></div>
+    </div>
+  </div></section>
+
+  <!-- Installer -->
+  <section class="block" id="installer"><div class="wrap">
+    <h2>Installer</h2>
+    <p class="sub">Deux voies — la plus simple arrive en un clic depuis le catalogue Onyxia.</p>
+    <div class="steps">
+      <div class="step"><span class="n"></span><span class="t"><b>Catalogue Onyxia (recommandé).</b> Catalogue → <em>sspcloud-mcp</em> → Lancer. Le service apparaît dans « Mes services », rôle et URL réglés tout seuls.</span></div>
+      <div class="step"><span class="n"></span><span class="t"><b>CLI durable.</b> Depuis un pod lancé en <code>kubernetes.role: edit</code>, une commande (ci-dessus) crée le Deployment durable et affiche votre clé.</span></div>
+      <div class="step"><span class="n"></span><span class="t"><b>Connecter Claude.</b> Collez l'URL <code>…/mcp</code> dans un connecteur ; au formulaire OAuth, saisissez la clé. Les 24 outils apparaissent.</span></div>
+    </div>
+    <div class="cta" style="margin-top:26px">
+      <a class="btn btn-primary" href="https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/blob/main/docs/INSTALL-IN-CLUSTER.md">Guide d'installation</a>
+      <a class="btn btn-ghost" href="https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/blob/main/docs/INSTALL-CATALOG.md">Install en un clic</a>
+    </div>
+  </div></section>
+</main>
+
+<footer><div class="wrap row">
+  <span>SSPCloud MCP — Agent Compute · CEREMA</span>
+  <span class="spacer"></span>
+  <a href="https://gitlab.cerema.fr/mcp/sspcloud_mcp">Dépôt GitLab</a>
+  <a href="https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/blob/main/CHANGELOG.md">Changelog</a>
+  <a href="https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/blob/main/LICENSE">Licence MIT</a>
+</div></footer>
+</body>
+</html>

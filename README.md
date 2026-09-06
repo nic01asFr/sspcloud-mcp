@@ -1,5 +1,13 @@
 # sspcloud-mcp — Agent Compute pour SSPCloud / Onyxia
 
+![MCP](https://img.shields.io/badge/MCP-server-3559FC)
+![SSPCloud](https://img.shields.io/badge/SSPCloud-Onyxia-4775FF)
+![OAuth](https://img.shields.io/badge/OAuth_2.1-DCR%20%2B%20PKCE-3559FC)
+![Outils](https://img.shields.io/badge/outils-24-4775FF)
+![Licence](https://img.shields.io/badge/licence-MIT-green)
+
+**▶ [Présentation produit](https://nic01asfr.github.io/sspcloud-mcp/)** · [Installer](docs/INSTALL-IN-CLUSTER.md) · [Pour un agent IA](AGENTS.md) · [Changelog](CHANGELOG.md)
+
 > Serveur **MCP** qui donne à un agent LLM (Claude Desktop, Claude Code, tout client
 > MCP) un **poste de travail distant sur SSPCloud** : pousser un repo (local ou GitHub)
 > dans un pod, écrire / exécuter / tester / évaluer du code, exploiter le **GPU** et des

@@ -1,0 +1,124 @@
+/* Vitrine sspcloud-mcp — reprend l'UI/UX Onyxia SSPCloud (thème sombre par défaut,
+   police Geist, bleu focus #3559FC, fond neumorphism approché). */
+
+:root {
+  /* Palette Onyxia (relevée du datalab SSPCloud) — thème sombre par défaut */
+  --accent: #3559FC;
+  --accent-light: #4775FF;
+  --accent-soft: #BDCDFF;
+  --bg: #22252F;
+  --bg-2: #1C1F27;
+  --surface: #2b2f3b;
+  --surface-2: #333847;
+  --border: #394053;
+  --ink: #f4f6fb;
+  --muted: #9AA6BE;
+  --ok: #10B981;
+  --font: "Geist", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 14px;
+  --maxw: 1080px;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(53,89,252,.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 20%, rgba(71,117,255,.10), transparent 55%),
+    var(--bg);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent-light); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+header {
+  position: sticky; top: 0; z-index: 10;
+  backdrop-filter: blur(10px);
+  background: rgba(28,31,39,.72);
+  border-bottom: 1px solid var(--border);
+}
+.nav { display: flex; align-items: center; gap: 16px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.01em; }
+.brand .logo { width: 26px; height: 26px; }
+.brand b { color: var(--ink); }
+.brand span { color: var(--accent-light); }
+.nav .spacer { flex: 1; }
+.nav a.navlink { color: var(--muted); font-size: 14px; font-weight: 500; }
+.nav a.navlink:hover { color: var(--ink); text-decoration: none; }
+.lang { color: var(--muted); font-size: 13px; }
+.lang a { color: var(--muted); }
+.lang a.active { color: var(--ink); font-weight: 600; }
+
+/* ── Boutons ────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 18px; border-radius: 10px; font-weight: 600; font-size: 15px;
+  border: 1px solid transparent; cursor: pointer; transition: .15s;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-light); text-decoration: none; }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--border); }
+.btn-ghost:hover { border-color: var(--accent-light); text-decoration: none; }
+
+/* ── Hero ───────────────────────────────────────────────────────────── */
+.hero { padding: 84px 0 56px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+.badge {
+  font-size: 12px; font-weight: 600; color: var(--accent-soft);
+  background: rgba(53,89,252,.12); border: 1px solid rgba(71,117,255,.25);
+  padding: 4px 10px; border-radius: 999px;
+}
+.hero h1 {
+  font-size: clamp(32px, 5vw, 52px); line-height: 1.08; letter-spacing: -.02em;
+  margin: 0 0 16px; max-width: 16ch;
+}
+.hero p.lead { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); max-width: 60ch; margin: 0 0 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.codeblock {
+  margin-top: 30px; background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; font-family: var(--mono);
+  font-size: 13.5px; color: #cfe0ff; overflow-x: auto; box-shadow: 0 10px 40px rgba(0,0,0,.35);
+}
+.codeblock .c { color: var(--muted); }
+
+/* ── Sections ───────────────────────────────────────────────────────── */
+section.block { padding: 52px 0; border-top: 1px solid var(--border); }
+section.block h2 { font-size: clamp(24px, 3vw, 32px); letter-spacing: -.01em; margin: 0 0 10px; }
+section.block .sub { color: var(--muted); max-width: 62ch; margin: 0 0 30px; }
+
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.card {
+  background: linear-gradient(180deg, var(--surface), var(--surface-2));
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 22px;
+}
+.card .ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: rgba(53,89,252,.15); color: var(--accent-light); margin-bottom: 12px; font-size: 18px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+.steps { counter-reset: s; display: grid; gap: 14px; }
+.step { display: flex; gap: 14px; align-items: flex-start; }
+.step .n { counter-increment: s; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+.step .n::before { content: counter(s); }
+.step .t { color: var(--muted); }
+.step .t b { color: var(--ink); }
+
+.pill-ok { color: var(--ok); font-weight: 600; }
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+footer { border-top: 1px solid var(--border); padding: 36px 0; color: var(--muted); font-size: 14px; }
+footer .row { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+footer .spacer { flex: 1; }
+
+@media (max-width: 640px) {
+  .nav a.navlink.hide-sm { display: none; }
+  .hero { padding: 56px 0 40px; }
+}
