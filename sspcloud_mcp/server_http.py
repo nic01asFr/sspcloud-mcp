@@ -85,9 +85,15 @@ class _Handler(BaseHTTPRequestHandler):
             ctype = hdrs.pop("Content-Type")
         self.send_response(code)
         self._cors()
+        # Content-Length TOUJOURS, meme vide. En HTTP/1.1 la connexion est
+        # persistante : sans cet en-tete, le client ne sait pas que la reponse
+        # est terminee et attend jusqu'a son timeout. Cela rendait muettes
+        # toutes les reponses sans corps — donc les redirections 302 du flux
+        # OAuth et les 202 de notification. Mesure a l'appui : curl restait
+        # bloque sur la redirection du consentement.
+        self.send_header("Content-Length", str(len(body)))
         if body:
             self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
         for k, v in hdrs.items():
             self.send_header(k, v)
         self.end_headers()
