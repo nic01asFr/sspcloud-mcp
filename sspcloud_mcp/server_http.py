@@ -56,8 +56,14 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _authorized(self) -> bool:
+        """Aucun bearer configuré ne vaut PAS « ouvert à tous ».
+
+        Ce serveur expose l'exécution de code et le déploiement sous le compte
+        de service du namespace : un démarrage sans clé était une porte ouverte
+        pour qui connaissait l'URL. On refuse, et le démarrage le dit.
+        """
         if not _BEARER:
-            return True
+            return False
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return False
@@ -171,6 +177,13 @@ class _Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw.decode("utf-8") or "{}")
                 resp = oauth.handle_register(body)
                 self._send(201, json.dumps(resp).encode())
+            except ValueError as exc:
+                # Redirections absentes ou non recevables : le dire, plutôt que
+                # d'enregistrer un client que /authorize devra refuser ensuite.
+                self._send(400, json.dumps({
+                    "error": "invalid_redirect_uri",
+                    "error_description": str(exc),
+                }).encode())
             except Exception:
                 self._send(400, b'{"error":"invalid json"}')
             return
@@ -179,7 +192,8 @@ class _Handler(BaseHTTPRequestHandler):
             ctype = self.headers.get("Content-Type", "")
             raw = self._read_body()
             form = oauth._parse_form(raw, ctype)  # noqa: SLF001
-            code, body, extra = oauth.authorize_confirm(form, q)
+            code, body, extra = oauth.authorize_confirm(
+                form, q, self.headers.get("Cookie", ""))
             self._send(code, body, extra.get("Content-Type", "text/html"), extra)
             return
         if _OAUTH and path == "/oauth/token":
@@ -224,6 +238,14 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     _Handler.engine = _Engine()
     httpd = ThreadingHTTPServer(("0.0.0.0", _PORT), _Handler)
+    if not _BEARER:
+        # Refuser n'est pas suffisant s'il faut deviner pourquoi : on le dit.
+        print(
+            "sspcloud-mcp : PASSERELLE_MCP_BEARER n'est pas defini — toutes les "
+            "requetes seront refusees (401). Ce serveur expose l'execution de "
+            "code et le deploiement : il ne demarre jamais ouvert.",
+            flush=True,
+        )
     print(f"sspcloud-mcp HTTP sur :{_PORT}  (bearer={'oui' if _BEARER else 'non'})",
           flush=True)
     try:
