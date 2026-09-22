@@ -12,15 +12,17 @@
 # même stsonly). Réutilise le ServiceAccount du pod (qui porte le rôle edit) —
 # indispensable, car un compte stsonly ne peut pas créer de RoleBinding.
 #
-#   curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/scripts/mcp_deploy.sh | bash
+# Voie supportée (chart + image GHCR + Mes services) :
+#   curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash
+#
+# Ce fichier reste un repli kubectl apply. Ne pas le documenter comme install.
 #
 # Idempotent : réutilise le Secret mcp-bearer et les noms mcp-http / mcp-ingress,
 # donc l'URL et la clé API ne changent pas entre deux exécutions.
 
 set -e
-REPO="https://gitlab.cerema.fr/mcp/sspcloud_mcp"
 NAME="${MCP_NAME:-mcp}"                       # URL : user-<user>-<NAME>
-IMAGE="${MCP_IMAGE:-inseefrlab/onyxia-jupyter-python:py3.13.13}"
+IMAGE="${MCP_IMAGE:-ghcr.io/nic01asfr/sspcloud-mcp:latest}"
 NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 USER=${NS#user-}
 HOST="${NS}-${NAME}.user.lab.sspcloud.fr"
@@ -64,11 +66,8 @@ spec:
       containers:
       - name: mcp
         image: ${IMAGE}
-        command: ["/bin/bash","-lc"]
-        args:
-        - |
-          pip install --quiet "git+${REPO}.git" 2>/dev/null || true
-          exec /opt/python/bin/python -m sspcloud_mcp.server_http
+        imagePullPolicy: Always
+        command: ["python","-m","sspcloud_mcp.server_http"]
         env:
         - { name: PORT, value: "8000" }
         - { name: SSPCLOUD_NAMESPACE, value: "${NS}" }

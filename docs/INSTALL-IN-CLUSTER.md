@@ -66,8 +66,11 @@ survit à la fermeture de vos pods Jupyter**. Elle crée le Service + Ingress (U
 génère la **clé API** stable, et affiche vos infos de connexion.
 
 ```bash
-curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/charts/sspcloud-mcp/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash
 ```
+
+Le script déploie l'image **`ghcr.io/nic01asfr/sspcloud-mcp`** (chart Helm GitHub).
+Le service apparaît dans **Mes services**.
 
 Sortie (exemple) :
 
@@ -86,12 +89,14 @@ collez-y la **clé API**. Les **24 outils** apparaissent.
 
 ![Formulaire d'autorisation OAuth « Autoriser Claude »](img/04-oauth-authorize.png)
 
-> **Encore plus simple (à venir) :** une fois le chart publié et le catalogue ajouté dans
-> Onyxia, l'installation se fait **en un clic** depuis le catalogue (le service apparaît alors
-> nativement dans « Mes services »). Voir la note du dépôt sur le chart `charts/sspcloud-mcp/`.
+> **Catalogue Onyxia :** une fois la source Helm ajoutée
+> (`https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/helm-repo`),
+> le lancement se fait en un clic. Voir [INSTALL-CATALOG.md](INSTALL-CATALOG.md).
+> La commande ci-dessus fait déjà apparaître le service dans « Mes services ».
 >
-> Mettre à jour le code : `kubectl rollout restart deployment/mcp -n <ns>` (la clé est
-> conservée). Retirer : `helm uninstall mcp -n <ns>` ou depuis « Mes services ».
+> Mettre à jour l'image : relancer la même commande, ou
+> `kubectl rollout restart deployment/mcp -n <ns>` (la clé est conservée).
+> Retirer : `helm uninstall mcp -n <ns>` ou depuis « Mes services ».
 
 > **Dépannage rapide (non durable) :** `scripts/mcp_expose.sh` lance le serveur dans le
 > terminal — pratique pour un test ponctuel, mais il **tombe en ~10 min** (fermeture des

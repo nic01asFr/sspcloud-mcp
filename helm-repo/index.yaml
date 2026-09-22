@@ -1,0 +1,29 @@
+apiVersion: v1
+entries:
+  sspcloud-mcp:
+  - apiVersion: v2
+    appVersion: 0.3.0
+    created: "2026-09-23T00:34:26.7717265+02:00"
+    description: 'Agent Compute — serveur MCP durable qui donne à un assistant IA
+      (Claude Desktop, Code, mobile) un poste de calcul distant sur SSPCloud : exécuter
+      du code, piloter le GPU, des notebooks à état persistant, déployer des services.
+      Connecteur OAuth. Image ghcr.io/nic01asfr/sspcloud-mcp, chart publié sur GitHub.'
+    digest: f3acdbebf3db1c3ac66fa5f652ecdd25096877167b1c4bb0073e2ea4c64d8b42
+    home: https://github.com/nic01asFr/sspcloud-mcp
+    icon: https://raw.githubusercontent.com/InseeFrLab/onyxia/main/web/public/favicon.svg
+    keywords:
+    - mcp
+    - sspcloud
+    - onyxia
+    - agent
+    - compute
+    maintainers:
+    - name: CEREMA
+    name: sspcloud-mcp
+    sources:
+    - https://github.com/nic01asFr/sspcloud-mcp
+    type: application
+    urls:
+    - https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/helm-repo/sspcloud-mcp-0.4.0.tgz
+    version: 0.4.0
+generated: "2026-09-23T00:34:26.7705819+02:00"

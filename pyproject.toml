@@ -26,7 +26,7 @@ service = [
 sspcloud-mcp = "sspcloud_mcp.server:main"
 
 [project.urls]
-Repository = "https://gitlab.cerema.fr/mcp/sspcloud_mcp"
+Repository = "https://github.com/nic01asFr/sspcloud-mcp"
 
 [tool.setuptools.packages.find]
 where = ["."]

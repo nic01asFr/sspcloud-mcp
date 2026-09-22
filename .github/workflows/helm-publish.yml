@@ -1,0 +1,26 @@
+# Vérifie le chart. L'index Helm (helm-repo/) est versionné dans Git :
+# GitHub miroir GitLab, donc un commit fait par Actions sur GitHub
+# serait écrasé au miroir suivant.
+name: Lint Helm chart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/sspcloud-mcp/**"
+      - "install.sh"
+      - ".github/workflows/helm-publish.yml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint
+        run: helm lint charts/sspcloud-mcp --set app.host=ci.example.fr

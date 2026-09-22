@@ -45,8 +45,8 @@ Notez le **nom de votre contexte** (`kubectl config current-context`) — il ira
 ## Étape 2 — Installer sspcloud-mcp
 
 ```bash
-git clone https://gitlab.cerema.fr/mcp/sspcloud_mcp.git
-cd sspcloud_mcp
+git clone https://github.com/nic01asFr/sspcloud-mcp.git
+cd sspcloud-mcp
 pip install -e .
 ```
 

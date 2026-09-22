@@ -6,19 +6,16 @@ la mise en place (une fois) puis l'usage (pour chacun).
 
 ## A. Publier le chart (une fois, automatique)
 
-La CI (`.gitlab-ci.yml`, job `publish-chart`) **package et publie** le chart dans le
-registre Helm intégré du projet GitLab à chaque push sur `main` touchant
-`charts/sspcloud-mcp/`. L'URL du repo Helm pour les consommateurs est :
+L'image tourne sur **`ghcr.io/nic01asfr/sspcloud-mcp`** (workflow `.github/workflows/build.yml`).
+Le chart Helm est packagé sur GitHub par `.github/workflows/helm-publish.yml`, sur le
+même modèle que QGIS et Grist Coder. L'URL du repo Helm pour Onyxia est :
 
 ```
-https://gitlab.cerema.fr/api/v4/projects/<PROJECT_ID>/packages/helm/stable
+https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/helm-repo
 ```
-
-`<PROJECT_ID>` = l'ID numérique du projet `mcp/sspcloud_mcp` (page du projet GitLab →
-sous le nom, ou *Settings → General*). Le job CI l'affiche aussi dans ses logs.
 
 > Republier une nouvelle version : **bumper `version:`** dans
-> `charts/sspcloud-mcp/Chart.yaml` (le registre versionne par numéro de chart).
+> `charts/sspcloud-mcp/Chart.yaml`, puis pousser sur `main`.
 
 ## B. Ajouter le catalogue dans Onyxia (une fois)
 
@@ -35,8 +32,9 @@ Deux options :
    et l'URL sont réglés par le chart / Onyxia).
 2. Onyxia crée le Deployment + SA dédié + RoleBinding `edit` + Ingress, et le service
    apparaît dans **« Mes services »**.
-3. Cliquer **Ouvrir** : la fenêtre « Accès au service » affiche l'**URL du connecteur** et
-   comment récupérer la **clé API** (`NOTES.txt`).
+3. Cliquer **Ouvrir** : la fenêtre « Accès au service » affiche l'**URL du connecteur**
+   (`https://…/mcp`) et la **clé API** (`NOTES.txt`, ligne `password:`). L'image tirée
+   est `ghcr.io/nic01asfr/sspcloud-mcp`.
 4. Connecter Claude (OAuth ou header statique) — voir la fiche affichée ou [AGENTS.md](../AGENTS.md) §6.
 
 ## Pourquoi c'est le bon modèle

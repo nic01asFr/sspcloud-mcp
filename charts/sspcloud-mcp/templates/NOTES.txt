@@ -1,36 +1,76 @@
-### SSPCloud MCP — Agent Compute déployé
+{{/*
+Onyxia affiche ce fichier en markdown dans la fenêtre du service.
+Règles vérifiées sur les charts qgis-hub et grist-coder :
+  - le bouton « Ouvrir » suit la première URL d'ingress citée. Le texte du
+    lien ne doit pas être l'URL elle-même (Onyxia prend l'URL et tout ce qui
+    suit jusqu'à une espace ou « ) ») ;
+  - le bouton « Copier le mot de passe » cherche « password: <valeur> »,
+    sans mise en forme autour.
+*/}}
+{{- $host := .Values.app.host -}}
+{{- $base := printf "https://%s" $host -}}
+{{- $garde := .Values.appAuth.token -}}
+### SSPCloud MCP est lancé
 
-Votre serveur MCP tourne comme Deployment Kubernetes : **redémarrage automatique,
-jamais auto-suspendu**. Il survit à la fermeture de vos pods Jupyter.
+- Santé du service : [ouvrir]({{ $base }}/health)
 
-**1. URL du connecteur** (à coller dans Claude) :
+Le serveur est un Deployment Kubernetes : redémarrage automatique, jamais
+auto-suspendu. Il survit à la fermeture des pods Jupyter.
 
-  `https://{{ .Values.app.host }}/mcp`
+### URL du connecteur (copier-coller)
 
-**2. Récupérer votre clé API (Bearer)** — jamais connue de l'auteur du chart :
+Collez cette adresse dans Claude : Paramètres → Connecteurs → Ajouter un
+connecteur MCP.
 
-  `kubectl get secret {{ include "sspcloud-mcp.fullname" . }} -o jsonpath='{.data.PASSERELLE_MCP_BEARER}' | base64 -d ; echo`
+```
+{{ $base }}/mcp
+```
 
-**3. Connecter Claude** — deux chemins :
+{{- if $garde }}
 
-  (a) **Connecteur OAuth** (Claude Desktop / mobile / claude.ai) : Paramètres →
-      Connecteurs → Ajouter un connecteur MCP → collez l'URL ci-dessus. Au
-      formulaire d'autorisation, saisissez la clé de l'étape 2.
+Clé API (à saisir au formulaire OAuth, ou en-tête Authorization) / password: {{ $garde }}
+{{- else }}
 
-  (b) **Header statique** (Claude Code, `.mcp.json`) :
+La clé a été tirée au sort au déploiement. Pour la lire :
 
-      {
-        "mcpServers": {
-          "sspcloud-mcp": {
-            "type": "http",
-            "url": "https://{{ .Values.app.host }}/mcp",
-            "headers": { "Authorization": "Bearer <clé de l'étape 2>" }
-          }
-        }
-      }
+```
+kubectl get secret {{ include "sspcloud-mcp.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.PASSERELLE_MCP_BEARER}' | base64 -d ; echo
+```
+{{- end }}
 
-**Health** : `https://{{ .Values.app.host }}/health`
+### Config MCP Claude Code / Cursor (copier-coller)
 
-Pour arrêter : supprimez ce service depuis « Mes services », ou
+{{- if $garde }}
+
+```json
+{
+  "mcpServers": {
+    "sspcloud-mcp": {
+      "type": "http",
+      "url": "{{ $base }}/mcp",
+      "headers": { "Authorization": "Bearer {{ $garde }}" }
+    }
+  }
+}
+```
+{{- else }}
+
+```json
+{
+  "mcpServers": {
+    "sspcloud-mcp": {
+      "type": "http",
+      "url": "{{ $base }}/mcp",
+      "headers": { "Authorization": "Bearer <clé API>" }
+    }
+  }
+}
+```
+{{- end }}
+
+**Alternative** — Claude Desktop / mobile / claude.ai : connecteur personnalisé,
+URL `{{ $base }}/mcp`, clé API une fois au consentement OAuth.
+
+Pour arrêter : Mes services → supprimer, ou
 `helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}`
-(votre clé Bearer est conservée pour un redéploiement — annotation resource-policy: keep).
+(la clé Bearer est conservée — annotation resource-policy: keep).

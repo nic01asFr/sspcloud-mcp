@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "sspcloud-mcp.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ if .Values.global.suspend }}0{{ else }}{{ .Values.replicaCount }}{{ end }}
   selector:
     matchLabels:
       {{- include "sspcloud-mcp.selectorLabels" . | nindent 6 }}
@@ -22,19 +22,13 @@ spec:
       {{- else if .Values.serviceAccount.name }}
       serviceAccountName: {{ .Values.serviceAccount.name }}
       {{- end }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: mcp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Le serveur EST le process principal (PID 1 du conteneur) → jamais
-          # fauché par le cull des terminaux ni l'auto-suspension d'un service
-          # interactif. On installe sspcloud_mcp au démarrage puis exec le serveur.
-          command: ["/bin/bash", "-lc"]
-          args:
-            - |
-              pip install --quiet "git+{{ .Values.app.repoUrl }}@{{ .Values.app.ref }}" 2>/dev/null \
-                || pip install --quiet --user "git+{{ .Values.app.repoUrl }}@{{ .Values.app.ref }}" 2>/dev/null || true
-              exec /opt/python/bin/python -m sspcloud_mcp.server_http
+          command: ["python", "-m", "sspcloud_mcp.server_http"]
           ports:
             - name: http
               containerPort: {{ .Values.app.port }}

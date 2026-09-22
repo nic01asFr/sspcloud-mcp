@@ -86,8 +86,8 @@ Pod(s) SSPCloud  ── git clone · pip · pytest · GPU · notebooks · checkp
 > d'autrui.
 
 ```bash
-git clone https://gitlab.cerema.fr/mcp/sspcloud_mcp.git
-cd sspcloud_mcp
+git clone https://github.com/nic01asFr/sspcloud-mcp.git
+cd sspcloud-mcp
 pip install -e .            # cœur autonome (websockets)
 # pip install -e .[service] # + outils de déploiement service_* (SDK Passerelle)
 ```
@@ -249,12 +249,20 @@ survit à la fermeture des pods Jupyter**. Exposé en **connecteur MCP OAuth** (
 HTTP + OAuth 2.1 + DCR RFC 7591 + PKCE, **CORS** pour le flux navigateur de claude.ai),
 déclarable dans Claude Desktop **et l'app mobile**.
 
-Deux voies d'installation :
-- **Catalogue Onyxia** (recommandé, **un clic**) — chart `charts/sspcloud-mcp/` : Onyxia
-  crée SA dédié + RoleBinding `edit`, et le service apparaît dans **« Mes services »**.
-- **CLI** — `charts/sspcloud-mcp/scripts/install.sh` (ou `scripts/mcp_deploy.sh`) depuis un
-  pod lancé en `kubernetes.role: edit`. Voir **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)**
-  et **[AGENTS.md](AGENTS.md)** (install pilotée par un agent IA).
+Deux voies d'installation. Les deux tirent l'image **`ghcr.io/nic01asfr/sspcloud-mcp`**
+et le chart Helm publié sur GitHub (pas un clone GitLab au démarrage du pod) :
+- **Catalogue Onyxia** (recommandé, **un clic**) — source Helm
+  `https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/helm-repo`. Onyxia
+  crée SA dédié + RoleBinding `edit`, et le service apparaît dans **« Mes services »**
+  (notes : URL du connecteur + clé API).
+- **CLI** — depuis un pod lancé en `kubernetes.role: edit` :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash
+```
+
+  Le script enregistre aussi le service dans **Mes services**. Voir
+  **[docs/INSTALL-IN-CLUSTER.md](docs/INSTALL-IN-CLUSTER.md)** et **[AGENTS.md](AGENTS.md)**.
 
 > `scripts/mcp_expose.sh` (lancement dans le terminal) reste pour un **test rapide**, mais
 > il est **fragile** (tombe en ~10 min) — préférez la voie durable ci-dessus.

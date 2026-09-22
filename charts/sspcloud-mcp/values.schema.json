@@ -2,6 +2,31 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "image": {
+      "type": "object",
+      "title": "Image",
+      "description": "Conteneur publié sur GitHub Container Registry.",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "title": "Registre",
+          "default": "ghcr.io/nic01asfr/sspcloud-mcp",
+          "x-onyxia": { "hidden": true }
+        },
+        "tag": {
+          "type": "string",
+          "title": "Version de l'image",
+          "default": "latest",
+          "x-onyxia": { "hidden": true }
+        },
+        "pullPolicy": {
+          "type": "string",
+          "default": "Always",
+          "enum": ["Always", "IfNotPresent"],
+          "x-onyxia": { "hidden": true }
+        }
+      }
+    },
     "app": {
       "type": "object",
       "title": "Serveur MCP",
@@ -13,14 +38,32 @@
           "description": "Hostname public du serveur (TLS auto). Renseigné par Onyxia.",
           "default": "",
           "x-onyxia": {
-            "overwriteDefaultWith": "user-{{user.idep}}-sspcloud-mcp.user.lab.sspcloud.fr"
+            "hidden": true,
+            "overwriteDefaultWith": "user-{{user.idep}}-mcp.{{k8s.domain}}"
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "title": "Ingress",
+      "x-onyxia": { "hidden": true },
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "k8s.ingress"
           }
         },
-        "ref": {
+        "className": {
           "type": "string",
-          "title": "Version du serveur (branche ou tag)",
-          "description": "Ref git de sspcloud_mcp installée au démarrage.",
-          "default": "main"
+          "default": "onyxia",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{k8s.ingressClassName}}"
+          }
         }
       }
     },
@@ -30,19 +73,35 @@
       "description": "Renseigné automatiquement.",
       "default": "",
       "x-onyxia": {
+        "hidden": true,
         "overwriteDefaultWith": "{{user.idep}}"
       }
     },
     "appAuth": {
       "type": "object",
       "title": "Clé API (Bearer)",
+      "x-onyxia": { "hidden": true },
       "properties": {
         "token": {
           "type": "string",
-          "title": "Clé API imposée (optionnelle)",
-          "description": "Laisser vide pour une génération aléatoire stable (48 car.). Reste dans votre namespace.",
+          "title": "Clé API",
+          "description": "Remplie par Onyxia. Affichée dans les notes du service.",
           "default": "",
-          "render": "password"
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{service.oneTimePassword}}"
+          }
+        }
+      }
+    },
+    "global": {
+      "type": "object",
+      "x-onyxia": { "hidden": true },
+      "properties": {
+        "suspend": {
+          "type": "boolean",
+          "default": false,
+          "x-onyxia": { "hidden": true }
         }
       }
     },
