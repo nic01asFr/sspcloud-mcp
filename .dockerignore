@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.pyc
+tests
+site
+docs
+helm-repo
+*.md
+!README.md
+!LICENSE

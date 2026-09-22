@@ -6,10 +6,12 @@
 # crée Service + Ingress (URL propre), génère la clé API, lance le serveur, et écrit
 # les infos de connexion dans ~/work/MCP_CONNEXION.txt (persistant sur le PVC).
 #
-#   curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/scripts/mcp_expose.sh | bash
+# Fragile (~10 min). Préférer :
+#   curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash
 
 set -e
-REPO="https://gitlab.cerema.fr/mcp/sspcloud_mcp"
+REPO="https://github.com/nic01asFr/sspcloud-mcp"
+RAW="https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main"
 NAME="${MCP_NAME:-mcp}"                       # nom du service (URL: user-<user>-<NAME>)
 NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 USER=${NS#user-}
@@ -76,9 +78,9 @@ EOF
 echo "[mcp_expose] Service + Ingress créés"
 
 # 4. Watchdog + démarrage du serveur (survit aux reboots via le hook Jupyter)
-curl -sf "${REPO}/-/raw/main/scripts/mcp_watchdog.sh" -o "$WORK/mcp_watchdog.sh"
+curl -sf "${RAW}/scripts/mcp_watchdog.sh" -o "$WORK/mcp_watchdog.sh"
 mkdir -p /home/onyxia/.jupyter
-curl -sf "${REPO}/-/raw/main/scripts/jupyter_server_config.py" -o /home/onyxia/.jupyter/jupyter_server_config.py 2>/dev/null || true
+curl -sf "${RAW}/scripts/jupyter_server_config.py" -o /home/onyxia/.jupyter/jupyter_server_config.py 2>/dev/null || true
 setsid bash "$WORK/mcp_watchdog.sh" </dev/null >>"$WORK/mcp_boot.log" 2>&1 &
 
 # 5. Attendre que le serveur réponde

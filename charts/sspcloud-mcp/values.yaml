@@ -1,19 +1,19 @@
 # Valeurs par défaut du chart sspcloud-mcp (Onyxia SSPCloud, self-hosted par-user).
 # Le serveur MCP est stateless (sessions in-memory) : pas de PVC.
 # Aucun secret n'est commité ici ; le bearer naît dans le namespace du user.
+#
+# L'image est tirée de GitHub Container Registry. Onyxia (catalogue) et install.sh
+# déploient cette image telle quelle : pas de pip au démarrage du pod.
 
 # --- Image ---------------------------------------------------------------------
-# On réutilise l'image Jupyter officielle (kubectl + helm + python inclus) et on
-# installe sspcloud_mcp au démarrage (pip). Aucune image dédiée à construire →
-# aucun registre conteneur requis. Démarrage ~30 s (pip), une fois par (re)start.
 image:
-  repository: inseefrlab/onyxia-jupyter-python
-  tag: "py3.13.13"
-  pullPolicy: IfNotPresent
+  repository: ghcr.io/nic01asfr/sspcloud-mcp
+  tag: latest
+  pullPolicy: Always
 
 # Noms de ressources. fullnameOverride force le nom exact des ressources
-# (Deployment/Service/Ingress/Secret) — l'install CLI y met le nom du service pour
-# des noms prévisibles. Vide = <release>-sspcloud-mcp (défaut Helm, voie catalogue).
+# (Deployment/Service/Ingress/Secret). L'install CLI y met « mcp » pour l'URL
+# user-<idep>-mcp. Vide = <release>-sspcloud-mcp (voie catalogue).
 nameOverride: ""
 fullnameOverride: ""
 
@@ -29,33 +29,32 @@ app:
   # Hostname public (surchargé par Onyxia, cf. values.schema.json).
   host: ""
   port: 8000
-  # Source pip du serveur : dépôt public + ref (branche/tag). Réécrit possible.
-  repoUrl: "https://gitlab.cerema.fr/mcp/sspcloud_mcp.git"
-  ref: "main"
 
 # --- Garde Bearer du pod (auto-générée) ----------------------------------------
-# Le chart crée son propre Secret avec un PASSERELLE_MCP_BEARER aléatoire stable
-# (helper lookup → conservé entre upgrades, jamais connu de l'auteur du chart).
-# Exigé sur /mcp, /register, SSE. Les clients MCP le portent via Authorization.
+# Passée en value par Onyxia ({{service.oneTimePassword}}) ou par install.sh,
+# pour que les NOTES affichent la clé. Vide → tirage dans le Secret, stable
+# entre upgrades (helper lookup).
 appAuth:
-  token: ""  # vide = généré aléatoirement (48 char), stable au prochain upgrade
+  token: ""
 
 # --- RBAC (piloter les pods de travail + lire les tokens Jupyter) --------------
-# Le serveur MCP a besoin de kubectl/helm pour lancer et piloter des pods de
-# travail (launch_chart, gpu_switch, exec). On crée un ServiceAccount dédié + un
-# RoleBinding vers la ClusterRole 'edit' (existante). RoleBinding vers une
-# ClusterRole EXISTANTE est autorisé en namespace utilisateur SSPCloud (≠ créer
-# une Role). Lancé depuis le catalogue, Onyxia crée ce binding automatiquement.
+# ServiceAccount dédié + RoleBinding vers la ClusterRole 'edit' (existante).
+# Lancé depuis le catalogue, Onyxia crée ce binding. En CLI, un pod utilisateur
+# ne peut pas créer de RoleBinding : install.sh met rbac.create=false et
+# réutilise le ServiceAccount du pod courant.
 rbac:
   create: true
   clusterRole: edit
 
-# ServiceAccount à réutiliser QUAND rbac.create=false (voie install CLI depuis un
-# pod : un pod utilisateur ne peut pas créer de RoleBinding, même vers 'edit' —
-# mesuré Forbidden). L'install.sh y met le SA du pod courant (rôle edit). Le
-# catalogue laisse rbac.create=true (Onyxia crée le SA + binding lui-même).
 serviceAccount:
   name: ""
+
+# --- Sécurité pod --------------------------------------------------------------
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
 
 # --- Ressources ----------------------------------------------------------------
 resources:
@@ -69,6 +68,10 @@ resources:
 # --- Répliques (sessions in-memory : garder 1) ---------------------------------
 replicaCount: 1
 
+# Pause Onyxia : 0 réplique. Le bouton « Suspendre » de Mes services.
+global:
+  suspend: false
+
 # --- Service -------------------------------------------------------------------
 service:
   type: ClusterIP
@@ -81,7 +84,6 @@ ingress:
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
-    # SSE : pas de buffering pour le flux d'événements du connecteur.
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
 
 # --- Probes (/health est public, pas de Bearer) --------------------------------
@@ -89,14 +91,14 @@ probes:
   readiness:
     enabled: true
     path: /health
-    initialDelaySeconds: 25
+    initialDelaySeconds: 5
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 6
   liveness:
     enabled: true
     path: /health
-    initialDelaySeconds: 90
+    initialDelaySeconds: 20
     periodSeconds: 30
     timeoutSeconds: 5
     failureThreshold: 3

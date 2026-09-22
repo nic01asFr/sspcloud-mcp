@@ -21,7 +21,7 @@ SSPCloud de l'utilisateur**, exposé en HTTPS, protégé par un bearer + OAuth.
 | Voie | Pour qui | Prérequis |
 |---|---|---|
 | **Catalogue Onyxia** (recommandé) | tout utilisateur, **un clic** | le chart doit être publié + le catalogue ajouté dans Onyxia (voir `docs/INSTALL-CATALOG.md`) |
-| **CLI `install.sh`** (durable) | utilisateur technique / agent | un pod lancé avec `kubernetes.role: edit` |
+| **CLI `install.sh`** (durable) | utilisateur technique / agent | un pod lancé avec `kubernetes.role: edit`. Script GitHub, image `ghcr.io/nic01asfr/sspcloud-mcp` |
 | ~~`mcp_expose.sh`~~ | dépannage rapide seulement | **fragile** : tombe en ~10 min (cull terminal / auto-suspension). NE PAS recommander pour un usage durable. |
 
 ## 3. Piège RBAC à connaître (mesuré)
@@ -42,10 +42,12 @@ Donc : **demander à l'utilisateur de lancer un service Jupyter/VSCode avec le r
 Dans un terminal d'un pod SSPCloud lancé en `kubernetes.role: edit` :
 
 ```bash
-curl -sf https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/charts/sspcloud-mcp/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash
 ```
 
-Le script crée un **Deployment durable** (jamais auto-suspendu), génère le bearer,
+Le script tire le chart Helm depuis GitHub et l'image **`ghcr.io/nic01asfr/sspcloud-mcp`**
+(pas un `pip install` depuis GitLab). Il crée un **Deployment durable**, génère le
+bearer, enregistre le service dans **Mes services** (Secret `sh.onyxia.release.v1.mcp`),
 et affiche l'URL + la clé. URL : `https://user-<idep>-mcp.user.lab.sspcloud.fr/mcp`.
 
 ## 5. Vérifier (l'agent DOIT faire ces contrôles)
@@ -61,8 +63,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/register \
 ```
 
 Et, avec le bearer, un `initialize` puis `tools/list` doivent renvoyer **24 outils**.
-Si `OPTIONS` renvoie 501 → le pod tourne du code trop ancien : `kubectl rollout
-restart deployment/mcp -n <ns>` (le serveur fait `pip install @main` au démarrage).
+Si `OPTIONS` renvoie 501 → le pod tourne une image trop ancienne : `kubectl rollout
+restart deployment/mcp -n <ns>` (l'image GHCR est en `pullPolicy: Always`).
 
 ## 6. Connecter Claude
 
@@ -78,9 +80,9 @@ restart deployment/mcp -n <ns>` (le serveur fait `pip install @main` au démarra
 
 ## 7. Maintenance
 
-Le Deployment installe le code **au démarrage du pod** ; pour tirer une mise à jour :
-`kubectl rollout restart deployment/mcp -n <ns>`. La clé bearer est conservée
-(`resource-policy: keep`), la config du client reste valable.
+L'image est **`ghcr.io/nic01asfr/sspcloud-mcp`**. Pour tirer une mise à jour :
+`kubectl rollout restart deployment/mcp -n <ns>` (ou relancer `install.sh`).
+La clé bearer est conservée (`resource-policy: keep`), la config du client reste valable.
 
 ## 8. Références
 

@@ -1,0 +1,52 @@
+name: Build & push image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sspcloud_mcp/**"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/nic01asfr/sspcloud-mcp
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/nic01asfr/sspcloud-mcp:latest
+            ghcr.io/nic01asfr/sspcloud-mcp:${{ github.sha }}
+
+      - name: Image publique (pull anonyme Onyxia)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/user/packages/container/sspcloud-mcp" \
+            -f visibility=public \
+            || gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/nic01asFr/sspcloud-mcp/packages/container/sspcloud-mcp" \
+            -f visibility=public \
+            || echo "Image poussée. Visibilité publique à confirmer sur ghcr.io."

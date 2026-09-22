@@ -7,9 +7,10 @@
 # self-service (repo public) : à mettre en init.personalInit d'un service jupyter
 # exposé sur le port 8000.
 #
-#   helm ... --set init.personalInit=https://gitlab.cerema.fr/mcp/sspcloud_mcp/-/raw/main/scripts/personal_init.sh
+#   helm ... --set init.personalInit=https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/scripts/personal_init.sh
 
-REPO="https://gitlab.cerema.fr/mcp/sspcloud_mcp"
+REPO="https://github.com/nic01asFr/sspcloud-mcp"
+RAW="https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main"
 WD=/home/onyxia/work/mcp_watchdog.sh
 
 # 1. sspcloud_mcp disponible (PVC psdk/ sinon pip depuis le repo public)
@@ -18,7 +19,7 @@ python -c "import sspcloud_mcp" 2>/dev/null \
   || pip install --quiet "git+${REPO}.git" 2>/dev/null || true
 
 # 2. watchdog présent (sinon télécharger depuis le repo public)
-[ -f "$WD" ] || curl -sf "${REPO}/-/raw/main/scripts/mcp_watchdog.sh" -o "$WD" 2>/dev/null
+[ -f "$WD" ] || curl -sf "${RAW}/scripts/mcp_watchdog.sh" -o "$WD" 2>/dev/null
 
 # 3. bearer (clé API du connecteur) : réutiliser sinon générer + persister
 if [ ! -s /home/onyxia/work/.mcp_bearer ]; then

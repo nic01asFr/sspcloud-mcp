@@ -1,5 +1,14 @@
 # Changelog
 
+## Chart 0.4.0
+
+Installation alignée sur QGIS et Grist Coder : image **`ghcr.io/nic01asfr/sspcloud-mcp`**,
+chart Helm publié sur GitHub, plus de `pip install` depuis GitLab au démarrage du pod.
+
+- Commande : `curl -fsSL https://raw.githubusercontent.com/nic01asFr/sspcloud-mcp/main/install.sh | bash`
+- `install.sh` enregistre le service dans **Mes services** (`sh.onyxia.release.v1.mcp`).
+- `NOTES.txt` et `values.schema.json` : bouton Ouvrir, clé (`password:`), hostname Onyxia.
+
 ## 0.3.0
 
 Service **durable** + **hébergement natif Onyxia** — 24 outils.
