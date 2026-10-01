@@ -164,10 +164,13 @@ class _Handler(BaseHTTPRequestHandler):
     # ── POST : messages JSON-RPC ──────────────────────────────────────────────
 
     def do_POST(self):
+        # Corps lu AVANT toute réponse : en HTTP/1.1 keep-alive, un corps non lu
+        # (401, 404...) serait pris pour le début de la requête suivante.
+        self._body = self._read_body()
         path = self.path.split("?", 1)[0].rstrip("/")
         if _OAUTH and path == "/register":
             try:
-                raw = self._read_body()
+                raw = self._body
                 body = json.loads(raw.decode("utf-8") or "{}")
                 resp = oauth.handle_register(body)
                 self._send(201, json.dumps(resp).encode())
@@ -177,13 +180,13 @@ class _Handler(BaseHTTPRequestHandler):
         if _OAUTH and path == "/authorize/confirm":
             q = self.path.split("?", 1)[1] if "?" in self.path else ""
             ctype = self.headers.get("Content-Type", "")
-            raw = self._read_body()
+            raw = self._body
             form = oauth._parse_form(raw, ctype)  # noqa: SLF001
             code, body, extra = oauth.authorize_confirm(form, q)
             self._send(code, body, extra.get("Content-Type", "text/html"), extra)
             return
         if _OAUTH and path == "/oauth/token":
-            raw = self._read_body()
+            raw = self._body
             code, body, extra = oauth.oauth_token(raw, self.headers.get("Content-Type", ""))
             self._send(code, body, extra.get("Content-Type", "application/json"), extra)
             return
@@ -194,7 +197,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._unauthorized()
             return
         try:
-            raw = self._read_body()
+            raw = self._body
             msg = json.loads(raw)
         except Exception:
             self._send(400, b'{"error":"invalid json"}')
