@@ -63,9 +63,28 @@ def kernel_error(detail: str) -> MCPToolError:
 def exec_timeout(seconds: float) -> MCPToolError:
     return MCPToolError(
         "EXEC_TIMEOUT",
-        f"Exécution dépassée ({seconds:.0f}s).",
+        f"Exécution dépassée ({seconds:.0f}s, plafond d'un appel synchrone).",
         "Pour un traitement long (entraînement...), utilisez background=true "
         "puis job_poll pour suivre l'avancement.",
+    )
+
+
+def session_busy(session_id: str, waited: float) -> MCPToolError:
+    return MCPToolError(
+        "SESSION_BUSY",
+        f"Session {session_id!r} occupée par un exec précédent "
+        f"(attente {waited:.0f}s).",
+        "Un appel antérieur tourne encore sur ce kernel. Réessayez dans "
+        "quelques secondes, ou lancez le traitement long avec background=true.",
+    )
+
+
+def kernel_start_timeout(session_id: str, seconds: float) -> MCPToolError:
+    return MCPToolError(
+        "KERNEL_START_TIMEOUT",
+        f"Kernel de la session {session_id!r} non prêt en {seconds:.0f}s.",
+        "Le pod est peut-être surchargé ou en cours de reprise. Réessayez ; "
+        "si l'erreur persiste, session_status puis session_start.",
     )
 
 

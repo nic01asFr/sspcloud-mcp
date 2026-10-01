@@ -18,6 +18,7 @@ requis pour exec — seulement pour le cycle de vie (launch/scale) côté admin.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -26,10 +27,17 @@ from pathlib import Path
 
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
-from .errors import no_session, pod_unreachable, exec_timeout
+from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
+                     kernel_start_timeout)
 
 _REGISTRY = Path.home() / ".passerelle" / "mcp_sessions.json"
 _DEFAULT_WORKDIR = "/home/onyxia/work"
+
+# Budget total d'un appel synchrone (verrou + kernel + exécution). Les clients
+# MCP (claude.ai, Claude Code) abandonnent un tools/call vers 60 s : au-delà,
+# l'agent ne reçoit rien alors que le serveur garde le verrou de session, et
+# les appels suivants sur la même session s'empilent puis expirent à leur tour.
+SYNC_BUDGET_S = float(os.environ.get("MCP_SYNC_BUDGET_S", "50"))
 
 
 # ── Modèle de session ─────────────────────────────────────────────────────────
@@ -231,20 +239,45 @@ class SessionManager:
             s._lock = asyncio.Lock()
         return s._lock
 
+    @contextlib.asynccontextmanager
+    async def _kernel_slot(self, s: DevSession, budget: float):
+        """Verrou de session + kernel prêt, dans le budget `budget` secondes.
+
+        Produit (kernel, secondes restantes pour l'exécution). Lève
+        SESSION_BUSY / KERNEL_START_TIMEOUT au lieu d'attendre indéfiniment.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + budget
+        lock = self._lock_of(s)
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=budget)
+        except asyncio.TimeoutError:
+            raise session_busy(s.id, budget) from None
+        try:
+            try:
+                kc = await asyncio.wait_for(
+                    self.ensure_kernel(s),
+                    timeout=max(deadline - loop.time(), 0.1))
+            except asyncio.TimeoutError:
+                raise kernel_start_timeout(s.id, budget) from None
+            yield kc, max(deadline - loop.time(), 0.1)
+        finally:
+            lock.release()
+
     async def exec_python(self, session_id: str, code: str,
-                          timeout: float = 120) -> ExecResult:
+                          timeout: float = SYNC_BUDGET_S) -> ExecResult:
         s = self.get(session_id)
         s.touch()
-        async with self._lock_of(s):
-            kc = await self.ensure_kernel(s)
+        budget = min(timeout, SYNC_BUDGET_S)
+        async with self._kernel_slot(s, budget) as (kc, remaining):
             try:
-                return await kc.execute(code, timeout=timeout)
+                return await kc.execute(code, timeout=remaining)
             except TimeoutError:
                 await kc.interrupt()          # libère le kernel du code bloqué
-                raise exec_timeout(timeout)
+                raise exec_timeout(budget)
 
     async def exec_bash(self, session_id: str, command: str,
-                        timeout: float = 120) -> dict:
+                        timeout: float = SYNC_BUDGET_S) -> dict:
         """Exécute une commande shell À TRAVERS le kernel (subprocess).
 
         Fonctionne quel que soit le transport, sans kubectl. Retourne
@@ -259,13 +292,13 @@ class SessionManager:
             "print('__PMCP__' + _json.dumps("
             "{'rc': _r.returncode, 'stdout': _r.stdout, 'stderr': _r.stderr}))\n"
         )
-        async with self._lock_of(s):
-            kc = await self.ensure_kernel(s)
+        budget = min(timeout, SYNC_BUDGET_S)
+        async with self._kernel_slot(s, budget) as (kc, remaining):
             try:
-                res = await kc.execute(wrap, timeout=timeout)
+                res = await kc.execute(wrap, timeout=remaining)
             except TimeoutError:
                 await kc.interrupt()
-                raise exec_timeout(timeout)
+                raise exec_timeout(budget)
         marker = "__PMCP__"
         idx = res.stdout.rfind(marker)
         if idx >= 0:

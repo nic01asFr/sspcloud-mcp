@@ -17,6 +17,7 @@ from . import transports as T
 from . import deploy_ops as D
 from . import gpu_broker as G
 from .errors import MCPToolError
+from .session import SYNC_BUDGET_S
 
 _NS_DEFAULT = os.getenv("SSPCLOUD_NAMESPACE", "")
 
@@ -86,7 +87,7 @@ async def exec_tool(mgr, args: dict) -> dict:
     sid = args["session_id"]
     code = args["code"]
     lang = args.get("lang", "python")
-    timeout = float(args.get("timeout", 120))
+    timeout = float(args.get("timeout", SYNC_BUDGET_S))
     if args.get("background"):
         # Traitement long détaché → handle immédiat, suivre avec job_poll.
         return await mgr.exec_background(sid, code, lang=lang)
@@ -346,7 +347,9 @@ TOOLS: dict = {
         "Exécute du code dans le pod. lang=python (kernel STATEFUL : variables et "
         "modèle GPU persistent entre appels) ou lang=bash (shell). Sorties bornées. "
         "background=true : traitement long détaché (entraînement...) → retourne un "
-        "job_id, suivre avec job_poll ; ne bloque pas le kernel.",
+        "job_id, suivre avec job_poll ; ne bloque pas le kernel. Un appel "
+        f"synchrone est plafonné à {SYNC_BUDGET_S:.0f}s (timeout au-delà ignoré) : "
+        "tout ce qui peut dépasser doit passer en background=true.",
         _s({"session_id": _STR, "code": _STR,
             "lang": {"type": "string", "enum": ["python", "bash"]},
             "timeout": _INT, "background": _BOOL}, ["session_id", "code"])),
