@@ -115,24 +115,48 @@ async def _push_local(mgr, session_id, s, path: Path, dest) -> dict:
     return {"path": target, "method": "local-tar", "sha": "", "size_mb": round(size_mb, 2)}
 
 
+# Serveur distant (HTTP) : son disque n'est pas celui du client. Le fichier est
+# alors renvoyé dans la réponse (texte ou base64) au lieu d'être écrit sur place.
+INLINE_PULL = False
+INLINE_MAX_BYTES = 1_000_000
+
+
 async def pull_artifact(mgr, session_id: str, remote_path: str,
                         local_path: str = "") -> dict:
-    """Rapatrie un fichier du pod vers le PC (base64 via kernel)."""
+    """Rapatrie un fichier du pod vers le client (base64 via kernel)."""
     s = mgr.get(session_id)
     rp = remote_path if remote_path.startswith("/") else f"{s.workdir}/{remote_path}"
+    limit = INLINE_MAX_BYTES if INLINE_PULL else -1
     code = (
         "import base64, os\n"
         f"_p = {rp!r}\n"
-        "print('SIZE', os.path.getsize(_p))\n"
-        "print('DATA', base64.b64encode(open(_p,'rb').read()).decode())\n"
+        "_n = os.path.getsize(_p)\n"
+        "print('SIZE', _n)\n"
+        f"if {limit} < 0 or _n <= {limit}:\n"
+        "    print('DATA', base64.b64encode(open(_p,'rb').read()).decode())\n"
     )
     res = await mgr.exec_python(session_id, code, timeout=300)
     if "DATA " not in res.stdout:
+        if "SIZE " in res.stdout:
+            size = int(res.stdout.split("SIZE ", 1)[1].split()[0])
+            raise MCPToolError(
+                "PULL_TOO_LARGE",
+                f"{remote_path} fait {size} octets (max {INLINE_MAX_BYTES} "
+                "via un serveur distant).",
+                "Exposez le fichier (expose_public) ou déposez-le sur S3, "
+                "puis téléchargez-le depuis le PC.")
         raise MCPToolError("PULL_FAILED",
                            f"Lecture impossible : {(res.error or {}).get('evalue', remote_path)}",
                            "Vérifiez le chemin dans le pod (list_files).")
     b64 = res.stdout.split("DATA ", 1)[1].strip()
     data = base64.b64decode(b64)
+    if INLINE_PULL:
+        out = {"path": remote_path, "bytes": len(data), "inline": True}
+        try:
+            out["content"] = data.decode("utf-8")
+        except UnicodeDecodeError:
+            out["content_base64"] = b64
+        return out
     out = Path(local_path or Path.cwd() / Path(remote_path).name)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)

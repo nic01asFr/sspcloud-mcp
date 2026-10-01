@@ -58,6 +58,21 @@ def test_exec_timeout_interrupts(monkeypatch):
     assert kc.interrupted
 
 
+def test_slow_interrupt_bounded(monkeypatch):
+    monkeypatch.setattr(S, "SYNC_BUDGET_S", 0.2)
+    monkeypatch.setattr(S, "_INTERRUPT_BUDGET_S", 0.2)
+    kc = FakeKernel(delay=5)
+
+    async def hanging_interrupt():
+        await asyncio.sleep(10)
+
+    kc.interrupt = hanging_interrupt
+    mgr = _manager(monkeypatch, kc)
+    with pytest.raises(MCPToolError) as e:
+        asyncio.run(asyncio.wait_for(mgr.exec_python("t", "1"), timeout=2))
+    assert e.value.code == "EXEC_TIMEOUT"
+
+
 def test_busy_session_fails_fast(monkeypatch):
     monkeypatch.setattr(S, "SYNC_BUDGET_S", 0.3)
     mgr = _manager(monkeypatch, FakeKernel())

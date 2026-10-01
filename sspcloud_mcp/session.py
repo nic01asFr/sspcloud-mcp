@@ -37,7 +37,9 @@ _DEFAULT_WORKDIR = "/home/onyxia/work"
 # MCP (claude.ai, Claude Code) abandonnent un tools/call vers 60 s : au-delà,
 # l'agent ne reçoit rien alors que le serveur garde le verrou de session, et
 # les appels suivants sur la même session s'empilent puis expirent à leur tour.
-SYNC_BUDGET_S = float(os.environ.get("MCP_SYNC_BUDGET_S", "50"))
+# Marge laissée sous ces 60 s : interruption du kernel + latence du proxy.
+SYNC_BUDGET_S = float(os.environ.get("MCP_SYNC_BUDGET_S", "40"))
+_INTERRUPT_BUDGET_S = 5
 
 
 # ── Modèle de session ─────────────────────────────────────────────────────────
@@ -264,6 +266,15 @@ class SessionManager:
         finally:
             lock.release()
 
+    @staticmethod
+    async def _interrupt(kc: KernelClient) -> None:
+        """Interruption best-effort, bornée : l'erreur doit atteindre le client
+        avant qu'il abandonne l'appel."""
+        try:
+            await asyncio.wait_for(kc.interrupt(), timeout=_INTERRUPT_BUDGET_S)
+        except asyncio.TimeoutError:
+            pass
+
     async def exec_python(self, session_id: str, code: str,
                           timeout: float = SYNC_BUDGET_S) -> ExecResult:
         s = self.get(session_id)
@@ -273,7 +284,7 @@ class SessionManager:
             try:
                 return await kc.execute(code, timeout=remaining)
             except TimeoutError:
-                await kc.interrupt()          # libère le kernel du code bloqué
+                await self._interrupt(kc)  # libère le kernel du code bloqué
                 raise exec_timeout(budget)
 
     async def exec_bash(self, session_id: str, command: str,
@@ -297,7 +308,7 @@ class SessionManager:
             try:
                 res = await kc.execute(wrap, timeout=remaining)
             except TimeoutError:
-                await kc.interrupt()
+                await self._interrupt(kc)
                 raise exec_timeout(budget)
         marker = "__PMCP__"
         idx = res.stdout.rfind(marker)

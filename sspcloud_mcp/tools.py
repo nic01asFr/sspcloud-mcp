@@ -134,7 +134,7 @@ async def read_file(mgr, args: dict) -> dict:
         f"_p = {path!r}\n"
         f"_d = open(_p,'r',errors='replace').read({maxb + 1})\n"
         f"print('TRUNC' if len(_d) > {maxb} else 'FULL')\n"
-        f"print(_d[:{maxb}])\n"
+        f"import sys; sys.stdout.write(_d[:{maxb}])\n"
     )
     res = await mgr.exec_python(sid, code, timeout=60)
     if res.error:
@@ -380,7 +380,10 @@ TOOLS: dict = {
         _s({"session_id": _STR, "path": _STR, "depth": _INT}, ["session_id"])),
 
     "pull_artifact": (pull_artifact,
-        "Rapatrie un fichier du pod vers le PC local (livrable, checkpoint...).",
+        "Rapatrie un fichier du pod (livrable, checkpoint...). Serveur local "
+        "(stdio) : écrit sur le PC (local = chemin cible). Serveur distant (HTTP) : "
+        "renvoie le contenu dans la réponse (content, ou content_base64 si binaire), "
+        "max 1 Mo ; local est alors ignoré.",
         _s({"session_id": _STR, "path": _STR, "local": _STR},
            ["session_id", "path"])),
 

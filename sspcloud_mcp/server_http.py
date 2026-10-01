@@ -25,7 +25,7 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import oauth
+from . import oauth, repo_sync
 from .server import _handle, SERVER_INFO
 from .session import SessionManager
 
@@ -222,6 +222,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    repo_sync.INLINE_PULL = True     # le client n'a pas accès au disque du serveur
     _Handler.engine = _Engine()
     httpd = ThreadingHTTPServer(("0.0.0.0", _PORT), _Handler)
     print(f"sspcloud-mcp HTTP sur :{_PORT}  (bearer={'oui' if _BEARER else 'non'})",
