@@ -319,6 +319,84 @@ async def unexpose_public(mgr, args: dict) -> dict:
     return await D.unexpose_pod(ns, name)
 
 
+_UNITES = {"Mi": 2 ** 20, "Gi": 2 ** 30, "Ti": 2 ** 40, "M": 10 ** 6, "G": 10 ** 9, "T": 10 ** 12}
+
+
+def taille_octets(taille: str) -> int:
+    """'500Gi' -> octets. Unites Kubernetes Mi, Gi, Ti, M, G, T (entier)."""
+    import re
+    m = re.fullmatch(r"(\d+)(Mi|Gi|Ti|M|G|T)", str(taille).strip())
+    if not m:
+        raise MCPToolError("SIZE_INVALID", f"Taille invalide : {taille!r}",
+                           "Ex: size='500Gi' (unites Mi, Gi, Ti).")
+    return int(m.group(1)) * _UNITES[m.group(2)]
+
+
+def _volume_resize_sync(pod: str, ns: str, size: str, pvc: str, dry_run: bool) -> dict:
+    import json
+    cible = taille_octets(size)
+    if pvc:
+        claims = [pvc]
+    else:
+        rc, out, err = T.kubectl("get", "pod", pod, "-o",
+                                 "jsonpath={.spec.volumes[*].persistentVolumeClaim.claimName}",
+                                 namespace=ns, timeout=20)
+        T._raise_if_forbidden(rc, err)
+        claims = out.split()
+        if rc != 0 or not claims:
+            raise MCPToolError("PVC_NOT_FOUND", f"Aucun volume persistant trouve pour {pod}",
+                               "Passez pvc=<nom> explicitement.")
+    resultats = []
+    for c in claims:
+        rc, out, err = T.kubectl("get", "pvc", c, "-o", "json", namespace=ns, timeout=20)
+        T._raise_if_forbidden(rc, err)
+        if rc != 0:
+            resultats.append({"pvc": c, "erreur": err.strip()[:200]})
+            continue
+        d = json.loads(out)
+        avant = d["spec"]["resources"]["requests"]["storage"]
+        classe = d["spec"].get("storageClassName", "")
+        rc2, out2, _ = T.kubectl("get", "storageclass", classe, "-o",
+                                 "jsonpath={.allowVolumeExpansion}", timeout=15)
+        extensible = out2.strip() if rc2 == 0 else "inconnu (lecture de la classe refusee)"
+        r = {"pvc": c, "avant": avant, "demande": size, "classe": classe, "extensible": extensible}
+        if taille_octets(avant) >= cible:
+            r["statut"] = "inchange : un volume ne se reduit pas (taille demandee <= actuelle)"
+        elif dry_run:
+            r["statut"] = "dry_run : rien modifie"
+        else:
+            patch = json.dumps({"spec": {"resources": {"requests": {"storage": size}}}})
+            rc3, out3, err3 = T.kubectl("patch", "pvc", c, "-p", patch, namespace=ns, timeout=30)
+            T._raise_if_forbidden(rc3, err3)
+            r["statut"] = "agrandissement demande" if rc3 == 0 else "refus : " + err3.strip()[:300]
+            rc4, out4, _ = T.kubectl("get", "pvc", c, "-o",
+                                     "jsonpath={.status.capacity.storage} {.status.conditions[*].type}",
+                                     namespace=ns, timeout=15)
+            r["etat"] = out4.strip() if rc4 == 0 else ""
+        resultats.append(r)
+    return {"pod": pod, "namespace": ns, "volumes": resultats,
+            "note": ("FileSystemResizePending : le systeme de fichiers s'agrandit au prochain "
+                     "montage (redemarrage du pod) si le pilote ne le fait pas a chaud.")}
+
+
+async def volume_resize(mgr, args: dict) -> dict:
+    """Agrandit le(s) volume(s) persistant(s) du pod d'une session (kubectl patch pvc)."""
+    sid = args.get("session_id")
+    if sid:
+        s = mgr.get(sid)
+        pod, ns = s.pod, s.namespace
+    else:
+        pod, ns = args.get("pod", ""), _ns(args)
+    if not pod and not args.get("pvc"):
+        raise MCPToolError("POD_REQUIRED", "session_id, pod ou pvc requis.",
+                           "volume_resize(session_id=..., size='500Gi').")
+    size = args.get("size", "")
+    taille_octets(size)
+    return await asyncio.get_event_loop().run_in_executor(
+        None, lambda: _volume_resize_sync(pod, ns, size, args.get("pvc", ""),
+                                          bool(args.get("dry_run", False))))
+
+
 # ── Registre : nom → (handler, description, schéma) ───────────────────────────
 
 def _s(props: dict, required: list[str]) -> dict:
@@ -459,4 +537,12 @@ TOOLS: dict = {
         "Retire l'exposition publique créée par expose_public (supprime Service + "
         "Ingress). Passez le même name (ou session_id) qu'à l'exposition.",
         _s({"session_id": _STR, "name": _STR, "namespace": _STR}, [])),
+
+    "volume_resize": (volume_resize,
+        "Agrandit le volume persistant (PVC) du pod d'une session : kubectl patch pvc via "
+        "le ServiceAccount du serveur (role edit). size = nouvelle taille (ex. '500Gi') ; "
+        "jamais de reduction ; dry_run=true pour verifier sans modifier. Le systeme de "
+        "fichiers peut demander un redemarrage du pod (FileSystemResizePending).",
+        _s({"session_id": _STR, "pod": _STR, "pvc": _STR, "namespace": _STR, "size": _STR,
+            "dry_run": _BOOL}, ["size"])),
 }
