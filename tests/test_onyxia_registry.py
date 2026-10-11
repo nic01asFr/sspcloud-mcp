@@ -200,3 +200,17 @@ def test_adopted_releases_are_not_service_managed(monkeypatch):
     create = [a for a in seen if a[0] == "create"][0]
     assert f"--from-literal=catalog={O.CATALOG_ADOPTED}" in create
     assert O.CATALOG_ADOPTED != O.CATALOG
+
+
+def test_sync_suspension_targets_only_stale_zero_replica_releases(monkeypatch):
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "a", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"},  # 0, non suspendu
+        {"name": "b", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"},  # 0, deja suspendu
+        {"name": "c", "chart": "jupyter-python-2.5.6", "status": "deployed"},       # actif
+        {"name": "d", "chart": "jupyter-python-2.5.6", "status": "deployed"},       # sans sts
+    ])
+    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {
+        "a-jupyter-pytorch-gpu": 0, "b-jupyter-pytorch-gpu": 0, "c-jupyter-python": 1})
+    monkeypatch.setattr(O, "_helm_suspended", lambda r, ns: r == "b")
+    assert O.sync_suspension("ns", dry_run=True) == {
+        "dry_run": True, "a_synchroniser": ["a"]}

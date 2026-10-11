@@ -158,6 +158,72 @@ def candidates(namespace: str) -> list[dict]:
     return sorted(out, key=lambda x: x["release"])
 
 
+def _statefulset_replicas(namespace: str) -> dict[str, int]:
+    import json
+    rc, out, _ = T.kubectl("get", "statefulsets", "-o", "json", namespace=namespace,
+                           timeout=25)
+    if rc != 0 or not out.strip():
+        return {}
+    return {i["metadata"]["name"]: int(i["spec"].get("replicas") or 0)
+            for i in json.loads(out).get("items", [])}
+
+
+def _helm_suspended(release: str, namespace: str) -> bool:
+    import json
+    import subprocess
+    from ._helm import find_helm, helm_env
+    r = subprocess.run([find_helm(), "get", "values", release, "-n", namespace,
+                        "-a", "-o", "json"], capture_output=True, text=True,
+                       timeout=30, env=helm_env())
+    try:
+        return bool(json.loads(r.stdout or "{}").get("global", {}).get("suspend"))
+    except Exception:
+        return False
+
+
+def sync_suspension(namespace: str, releases: list[str] | None = None,
+                    dry_run: bool = False) -> dict:
+    """Aligne l'état Helm sur le cluster pour les pods suspendus à la main.
+
+    Un pod mis à 0 par `kubectl scale` garde `global.suspend=false` : Onyxia
+    l'affiche « Démarrage du conteneur » à tort. On pose alors suspend=true (le
+    nombre de réplicas reste 0, aucun pod n'est touché).
+    """
+    import subprocess
+    from ._helm import find_helm, ensure_helm_repo, helm_env
+    replicas = _statefulset_replicas(namespace)
+    wanted = set(releases) if releases else None
+    todo, skipped = [], []
+    for r in _helm_releases(namespace):
+        chart = r.get("chart", "")
+        base = next((c for c in INTERACTIVE_CHARTS if chart.startswith(c + "-")), "")
+        if not base or r.get("status") != "deployed":
+            continue
+        if wanted is not None and r["name"] not in wanted:
+            continue
+        sts = replicas.get(f"{r['name']}-{base}")
+        if sts is None or sts > 0:
+            continue                       # pas de StatefulSet, ou pod actif
+        if _helm_suspended(r["name"], namespace):
+            continue                       # déjà cohérent
+        todo.append((r["name"], base, chart[len(base) + 1:]))
+    if dry_run:
+        return {"dry_run": True, "a_synchroniser": [t[0] for t in todo]}
+    helm = find_helm()
+    env = helm_env()
+    ensure_helm_repo(helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
+    done, failed = [], []
+    for name, base, version in todo:
+        up = subprocess.run(
+            [helm, "upgrade", name, f"inseefrlab/{base}", "-n", namespace,
+             "--version", version, "--reuse-values", "--set", "global.suspend=true"],
+            capture_output=True, text=True, timeout=90, env=env)
+        (done if up.returncode == 0 else failed).append(name)
+        if up.returncode != 0:
+            skipped.append({name: up.stderr.strip()[-120:]})
+    return {"synchronisees": done, "echecs": failed, "details_echecs": skipped}
+
+
 def adopt(namespace: str, releases: list[str] | None = None,
           dry_run: bool = False) -> dict:
     """Rend visibles dans Onyxia des releases existantes (Secret catalogue

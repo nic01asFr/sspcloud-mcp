@@ -251,6 +251,10 @@ async def pod_register(mgr, args: dict) -> dict:
     ns = _ns(args)
     raw = args.get("release", "")
     names = [x.strip() for x in raw.split(",") if x.strip()] if raw else None
+    if args.get("sync_suspend"):
+        # Aligne Helm (global.suspend) sur les pods mis à 0 par kubectl scale.
+        return await asyncio.get_event_loop().run_in_executor(
+            None, lambda: O.sync_suspension(ns, names, bool(args.get("dry_run", False))))
     if not names and not args.get("all"):
         # Garde-fou : sans cible explicite, simple aperçu (ni écriture, ni suppression).
         args = {**args, "dry_run": True}
@@ -536,8 +540,11 @@ TOOLS: dict = {
         "Rend visibles dans Onyxia « Mes services » des pods Helm déjà lancés "
         "(jupyter-python, jupyter-pytorch-gpu, vscode-python) : release=a,b ou all=true. "
         "Sans cible, aperçu seulement (dry_run). Ils restent hors de portée de "
-        "session_stop(uninstall) : seul Onyxia peut les supprimer.",
-        _s({"release": _STR, "all": _BOOL, "dry_run": _BOOL, "namespace": _STR}, [])),
+        "session_stop(uninstall) : seul Onyxia peut les supprimer. sync_suspend=true : "
+        "aligne l'état Helm sur les pods suspendus à la main (sinon Onyxia les "
+        "affiche « Démarrage du conteneur »).",
+        _s({"release": _STR, "all": _BOOL, "dry_run": _BOOL, "sync_suspend": _BOOL,
+            "namespace": _STR}, [])),
 
     "pod_info": (pod_info,
         "Accès et service d'un pod lancé par Helm : résume son NOTES.txt (URL "
