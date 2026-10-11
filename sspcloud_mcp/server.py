@@ -28,7 +28,7 @@ from .session import SessionManager
 from .errors import MCPToolError
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "sspcloud-mcp", "version": "0.2.0"}
+SERVER_INFO = {"name": "sspcloud-mcp", "version": "0.5.0"}
 
 
 def _tools_list() -> list[dict]:

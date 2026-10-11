@@ -1,6 +1,6 @@
 # Changelog
 
-## Non publié
+## 0.5.0
 
 - **Fix pods neufs** : le WebSocket kernel négocie le sous-protocole
   `v1.kernel.websocket.jupyter.org` (jupyter_server >= 2.21 coupait la connexion).
@@ -13,6 +13,20 @@
 - **GPU** : suspension/reprise par `helm upgrade --reuse-values --set global.suspend`
   (repli `kubectl scale`) ; `gpu_status(project=...)` contrôle la conformité au contrat.
 - URLs par défaut `…-mcp` (start_mcp.py, mcp_watchdog.sh), comme mcp_deploy.sh.
+- **`pod_register`** (27 outils) : rend visibles dans « Mes services » les pods Helm existants
+  (catalogue `ide`, annotation `sspcloud-mcp/origin`) ; `sync_suspend=true` aligne
+  `global.suspend` et `persistence.size` sur l'état réel. Les releases adoptées ne sont jamais
+  désinstallables par le service.
+- **Catalogue `ide`** : un catalogue inconnu dans le Secret Onyxia faisait échouer
+  Suspendre/Reprendre (erreur 500 sur `/api/my-lab/app/resume`).
+- **`volume_resize`** aligne `persistence.size` de la release Helm (sinon Helm refusait de
+  « réduire » le volume et bloquait Suspendre/Reprendre). Un upgrade Helm ne change plus
+  jamais l'état (suspendu/actif) d'un pod.
+- **Sessions persistantes** : registre sauvegardé dans le Secret `mcp-sessions` ; IP du pod
+  recalculée si elle a changé après un redéploiement.
+- **GPU** : les releases historiques `proj-<nom>` (sans `-gpu`) tiennent le slot ;
+  `gpu_projects` sans doublon.
+- Le kernel Python et `exec bash` créent et rejoignent le dossier du projet.
 
 ## Chart 0.4.0
 

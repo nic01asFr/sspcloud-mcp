@@ -3,7 +3,7 @@
 ![MCP](https://img.shields.io/badge/MCP-server-3559FC)
 ![SSPCloud](https://img.shields.io/badge/SSPCloud-Onyxia-4775FF)
 ![OAuth](https://img.shields.io/badge/OAuth_2.1-DCR%20%2B%20PKCE-3559FC)
-![Outils](https://img.shields.io/badge/outils-24-4775FF)
+![Outils](https://img.shields.io/badge/outils-27-4775FF)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 
 **▶ [Présentation produit](https://nic01asfr.github.io/sspcloud-mcp/)** · [Installer](docs/INSTALL-IN-CLUSTER.md) · [Pour un agent IA](AGENTS.md) · [Changelog](CHANGELOG.md)
@@ -167,7 +167,7 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 
 ---
 
-## Référence des outils (24)
+## Référence des outils (27)
 
 **Sessions & exécution**
 | Outil | Rôle |
@@ -188,9 +188,9 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 **GPU (slot unique arbitré)**
 | Outil | Rôle |
 |---|---|
-| `gpu_status` | État du slot GPU (quel projet le détient) ou `nvidia-smi` du pod. |
+| `gpu_status` | État du slot GPU (quel projet le détient), `nvidia-smi` du pod (`session_id`), ou contrôle de conformité d'un pod GPU au contrat du broker (`project`). |
 | `gpu_switch` | Bascule le slot GPU vers le pod GPU d'un projet (préemption, PVC préservé). |
-| `gpu_release` | Libère le slot GPU (scale 0) sans détruire l'environnement. |
+| `gpu_release` | Libère le slot GPU sans détruire l'environnement (suspension Helm, comme le bouton d'Onyxia). |
 
 **Projets & pods**
 | Outil | Rôle |
@@ -198,6 +198,13 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 | `project_start` | Lance un pod dédié pour un projet (CPU ou GPU). |
 | `project_bind` | Attache une session à un pod existant (nom ou filtre projet). |
 | `list_pods` | Liste les pods / statefulsets du namespace. |
+| `pod_info` | Accès d'un pod (NOTES.txt : URL, mot de passe masqué), état, visibilité dans Onyxia. |
+| `pod_register` | Rend visibles dans « Mes services » des pods déjà lancés ; `sync_suspend=true` aligne Helm sur les pods suspendus ou agrandis à la main. |
+| `volume_resize` | Agrandit le volume persistant d'un pod et aligne `persistence.size` de la release Helm. |
+
+Les pods lancés par le service sont enregistrés dans Onyxia (« Mes services », catalogue `ide`) :
+Suspendre, Reprendre et Supprimer fonctionnent depuis l'interface, et le slot GPU reste cohérent.
+Les sessions sont sauvegardées dans le Secret `mcp-sessions` et survivent à un redéploiement.
 
 **Exposition HTTPS publique**
 | Outil | Rôle |

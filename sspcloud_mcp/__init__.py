@@ -12,7 +12,7 @@ Cœur autonome (aucune dépendance externe hors websockets). Les outils service_
 Voir README.md et docs/GUIDE.md.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"
 
 from .kernel_client import KernelClient, ExecResult
 from .session import SessionManager, DevSession
