@@ -246,6 +246,18 @@ async def pod_info(mgr, args: dict) -> dict:
     return await loop.run_in_executor(None, _collect)
 
 
+async def pod_register(mgr, args: dict) -> dict:
+    """Rend visibles dans Onyxia « Mes services » des pods Helm existants."""
+    ns = _ns(args)
+    raw = args.get("release", "")
+    names = [x.strip() for x in raw.split(",") if x.strip()] if raw else None
+    if not names and not args.get("all"):
+        # Garde-fou : sans cible explicite, simple aperçu (ni écriture, ni suppression).
+        args = {**args, "dry_run": True}
+    return await asyncio.get_event_loop().run_in_executor(
+        None, lambda: O.adopt(ns, names, bool(args.get("dry_run", False))))
+
+
 async def _with_access(result: dict, namespace: str) -> dict:
     """Ajoute le résumé d'accès (NOTES.txt) au retour d'un lancement de pod."""
     release = O.release_of_pod(result.get("pod", ""))
@@ -519,6 +531,13 @@ TOOLS: dict = {
         "contrôle de conformité du pod GPU au contrat du broker (nom, GPU demandé, "
         "PVC, release Helm, visibilité Onyxia).",
         _s({"session_id": _STR, "project": _STR, "namespace": _STR}, [])),
+
+    "pod_register": (pod_register,
+        "Rend visibles dans Onyxia « Mes services » des pods Helm déjà lancés "
+        "(jupyter-python, jupyter-pytorch-gpu, vscode-python) : release=a,b ou all=true. "
+        "Sans cible, aperçu seulement (dry_run). Ils restent hors de portée de "
+        "session_stop(uninstall) : seul Onyxia peut les supprimer.",
+        _s({"release": _STR, "all": _BOOL, "dry_run": _BOOL, "namespace": _STR}, [])),
 
     "pod_info": (pod_info,
         "Accès et service d'un pod lancé par Helm : résume son NOTES.txt (URL "

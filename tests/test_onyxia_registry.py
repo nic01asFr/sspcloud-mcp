@@ -172,3 +172,31 @@ def test_session_registry_roundtrip_through_secret(monkeypatch, tmp_path):
     # Nouveau gestionnaire sans fichier local (conteneur neuf) : relu depuis le Secret.
     mgr = S.SessionManager()
     assert mgr.get("a").pod == "p-0"
+
+
+def test_adopt_lists_only_unregistered_interactive_deployed(monkeypatch):
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "proj-a", "chart": "jupyter-python-2.5.6", "status": "deployed"},
+        {"name": "proj-b-gpu", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"},
+        {"name": "proj-c", "chart": "jupyter-python-2.5.2", "status": "deployed"},
+        {"name": "depth", "chart": "jupyter-pytorch-gpu-2.4.8", "status": "failed"},
+        {"name": "n8n", "chart": "n8n-1.1.0", "status": "deployed"},
+    ])
+    monkeypatch.setattr(O, "_registered", lambda ns: {"proj-c"})
+    assert [c["release"] for c in O.candidates("ns")] == ["proj-a", "proj-b-gpu"]
+    assert O.adopt("ns", dry_run=True)["a_enregistrer"] == ["proj-a", "proj-b-gpu"]
+    assert O.adopt("ns", ["proj-a", "inconnue"], dry_run=True) == {
+        "dry_run": True, "a_enregistrer": ["proj-a"], "ignorees": ["inconnue"]}
+
+
+def test_adopted_releases_are_not_service_managed(monkeypatch):
+    seen = []
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: (seen.append(a) or (0, "kind: S\n", "")))
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "proj-a", "chart": "jupyter-python-2.5.6", "status": "deployed"}])
+    monkeypatch.setattr(O, "_registered", lambda ns: set())
+    r = O.adopt("ns")
+    assert r["enregistrees"] == ["proj-a"]
+    create = [a for a in seen if a[0] == "create"][0]
+    assert f"--from-literal=catalog={O.CATALOG_ADOPTED}" in create
+    assert O.CATALOG_ADOPTED != O.CATALOG
