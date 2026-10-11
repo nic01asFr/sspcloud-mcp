@@ -18,9 +18,11 @@ requis pour exec — seulement pour le cycle de vie (launch/scale) côté admin.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +34,36 @@ from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
                      kernel_start_timeout)
 
 _REGISTRY = Path.home() / ".passerelle" / "mcp_sessions.json"
+_REGISTRY_SECRET = "mcp-sessions"
+_registry_lock = threading.Lock()
+
+
+def _secret_registry_read() -> str:
+    """Registre des sessions sauvegardé dans le Secret du namespace ('' si absent)."""
+    ns = os.getenv("SSPCLOUD_NAMESPACE", "")
+    try:
+        rc, out, _ = T.kubectl("get", "secret", _REGISTRY_SECRET, "-o",
+                               r"jsonpath={.data.sessions\.json}",
+                               namespace=ns or None, timeout=15)
+        return base64.b64decode(out.strip()).decode() if rc == 0 and out.strip() else ""
+    except Exception:
+        return ""
+
+
+def _secret_registry_write(payload: str) -> None:
+    """Sauvegarde le registre (contient les tokens Jupyter → Secret, pas ConfigMap)."""
+    ns = os.getenv("SSPCLOUD_NAMESPACE", "")
+    try:
+        with _registry_lock:
+            rc, yml, _ = T.kubectl(
+                "create", "secret", "generic", _REGISTRY_SECRET,
+                f"--from-literal=sessions.json={payload}",
+                "--dry-run=client", "-o", "yaml", namespace=ns or None, timeout=20)
+            if rc == 0 and yml.strip():
+                T.kubectl("apply", "-f", "-", namespace=ns or None,
+                          timeout=20, input_text=yml)
+    except Exception:
+        pass
 _DEFAULT_WORKDIR = "/home/onyxia/work"
 
 # Budget total d'un appel synchrone (verrou + kernel + exécution). Les clients
@@ -85,19 +117,35 @@ class SessionManager:
     # ── Persistance ───────────────────────────────────────────────────────────
 
     def _load(self) -> None:
-        if _REGISTRY.exists():
-            try:
-                for d in json.loads(_REGISTRY.read_text()).get("sessions", []):
-                    s = DevSession(**d)
-                    self._sessions[s.id] = s
-            except Exception:
-                pass
+        raw = ""
+        try:
+            if _REGISTRY.exists():
+                raw = _REGISTRY.read_text()
+        except Exception:
+            raw = ""
+        if not raw and T.in_cluster():
+            # Déploiement : le système de fichiers du conteneur est perdu à chaque
+            # redémarrage → relire le registre sauvegardé dans le Secret.
+            raw = _secret_registry_read()
+        if not raw:
+            return
+        try:
+            for d in json.loads(raw).get("sessions", []):
+                s = DevSession(**d)
+                self._sessions[s.id] = s
+        except Exception:
+            pass
 
     def _save(self) -> None:
-        _REGISTRY.parent.mkdir(parents=True, exist_ok=True)
-        _REGISTRY.write_text(json.dumps(
+        payload = json.dumps(
             {"sessions": [s.to_registry() for s in self._sessions.values()]},
-            indent=2))
+            indent=2)
+        _REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+        _REGISTRY.write_text(payload)
+        if T.in_cluster():
+            # kubectl hors de la boucle d'événements : ne jamais bloquer un appel.
+            threading.Thread(target=_secret_registry_write, args=(payload,),
+                             daemon=True).start()
 
     def get(self, session_id: str) -> DevSession:
         s = self._sessions.get(session_id)
@@ -216,20 +264,49 @@ class SessionManager:
             await asyncio.sleep(8)
         raise pod_unreachable(pod, "Pod pas Running dans le délai imparti.")
 
+    async def _reresolve(self, s: DevSession) -> bool:
+        """Recalcule base_url (IP/port) d'un pod in-cluster. True si elle a changé."""
+        if not (s.pod and T.in_cluster() and not s.base_url.startswith("https")):
+            return False
+        loop = asyncio.get_running_loop()
+
+        def _resolve() -> str:
+            ip = T.pod_ip(s.pod, s.namespace)
+            return f"http://{ip}:{T.jupyter_port(s.pod, s.namespace, ip)}" if ip else ""
+
+        try:
+            url = await loop.run_in_executor(None, _resolve)
+        except Exception:
+            return False
+        if url and url != s.base_url:
+            s.base_url = url
+            self._save()
+            return True
+        return False
+
     async def ensure_kernel(self, s: DevSession) -> KernelClient:
         """Garantit un kernel vivant (lazy, recréé si mort)."""
         if s._kernel is not None and s._kernel.alive:
             return s._kernel
         kc = KernelClient(s.base_url, token=s.token)
-        await kc.start()
+        try:
+            await kc.start()
+        except Exception:
+            # Session relue du registre après un redéploiement : l'IP du pod a pu
+            # changer (pod recréé). Résoudre à nouveau et réessayer une fois.
+            if not await self._reresolve(s):
+                raise
+            kc = KernelClient(s.base_url, token=s.token)
+            await kc.start()
         s._kernel = kc
         # Le kernel démarre dans la racine de Jupyter : l'aligner sur le workdir
-        # de la session (comme exec bash et list_files), s'il existe.
+        # de la session (comme exec bash et list_files), créé s'il manque.
         if s.workdir and s.workdir != _DEFAULT_WORKDIR:
             try:
                 await kc.execute(
                     f"import os\n_d = {s.workdir!r}\n"
-                    "os.path.isdir(_d) and os.chdir(_d)\ndel _d", timeout=10)
+                    "os.makedirs(_d, exist_ok=True)\nos.chdir(_d)\ndel _d",
+                    timeout=10)
             except Exception:
                 pass
         return kc

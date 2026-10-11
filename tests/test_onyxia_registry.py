@@ -141,3 +141,34 @@ def test_parse_notes_real_chart_format():
     assert r["open_url"] == "" and r["urls"] == []   # modèle localhost ignoré
     assert O.parse_notes(REAL_NOTES, reveal=True)["password"] == \
         "a2e5b6bf4264e890830198e334feaa18"
+
+
+def test_session_registry_roundtrip_through_secret(monkeypatch, tmp_path):
+    import json
+    from sspcloud_mcp import session as S
+    store = {}
+
+    def fake_kubectl(*args, namespace=None, timeout=30, input_text=None):
+        if args[0] == "create":
+            lit = [a for a in args if a.startswith("--from-literal=sessions.json=")][0]
+            return 0, "SECRET:" + lit.split("=", 2)[2], ""
+        if args[0] == "apply":
+            store["payload"] = input_text[len("SECRET:"):]
+            return 0, "", ""
+        if args[0] == "get":
+            import base64 as b
+            return 0, b.b64encode(store["payload"].encode()).decode(), ""
+        return 1, "", ""
+
+    monkeypatch.setattr(T, "kubectl", fake_kubectl)
+    monkeypatch.setattr(T, "in_cluster", lambda: True)
+    monkeypatch.setattr(S, "_REGISTRY", tmp_path / "absent" / "r.json")
+    payload = json.dumps({"sessions": [{
+        "id": "a", "namespace": "ns", "pod": "p-0", "base_url": "http://1.2.3.4:8888",
+        "token": "t", "gpu": False, "workdir": "/w", "repo_path": "",
+        "created_at": 1.0, "last_active": 1.0, "idle_minutes": 30}]})
+    S._secret_registry_write(payload)
+    assert json.loads(S._secret_registry_read())["sessions"][0]["id"] == "a"
+    # Nouveau gestionnaire sans fichier local (conteneur neuf) : relu depuis le Secret.
+    mgr = S.SessionManager()
+    assert mgr.get("a").pod == "p-0"
