@@ -24,3 +24,6 @@ Thumbs.db
 .env.local
 *token*.txt
 kubeconfig*
+
+# etat local WikiChat (ne pas versionner)
+.wikichat/
