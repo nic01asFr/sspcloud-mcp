@@ -218,38 +218,45 @@ def test_legacy_catalog_secrets_are_repaired(monkeypatch):
     assert O._registered("ns") == {"ok", "mcp"}      # 'casse' sera refait
 
 
-def test_sync_suspension_targets_only_stale_zero_replica_releases(monkeypatch):
+def test_sync_detects_stale_suspend_and_stale_volume_size(monkeypatch):
+    rel = lambda n, c: {"name": n, "chart": c, "status": "deployed"}
     monkeypatch.setattr(O, "_helm_releases", lambda ns: [
-        {"name": "a", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"},  # 0, non suspendu
-        {"name": "b", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"},  # 0, deja suspendu
-        {"name": "c", "chart": "jupyter-python-2.5.6", "status": "deployed"},       # actif
-        {"name": "d", "chart": "jupyter-python-2.5.6", "status": "deployed"},       # sans sts
+        rel("a", "jupyter-pytorch-gpu-2.5.6"),   # 0 réplica, suspend=false  -> suspend
+        rel("b", "jupyter-pytorch-gpu-2.5.6"),   # déjà cohérent
+        rel("c", "jupyter-python-2.5.6"),        # actif, volume agrandi     -> taille
+        rel("d", "jupyter-python-2.5.6"),        # sans StatefulSet, ok
+        {"name": "n8n", "chart": "n8n-1.1.0", "status": "deployed"},
     ])
     monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {
         "a-jupyter-pytorch-gpu": 0, "b-jupyter-pytorch-gpu": 0, "c-jupyter-python": 1})
-    monkeypatch.setattr(O, "_helm_suspended", lambda r, ns: r == "b")
-    assert O.sync_suspension("ns", dry_run=True) == {
-        "dry_run": True, "a_synchroniser": ["a"]}
+    values = {"a": {"persistence": {"size": "20Gi"}},
+              "b": {"global": {"suspend": True}, "persistence": {"size": "20Gi"}},
+              "c": {"persistence": {"size": "10Gi"}},
+              "d": {"persistence": {"size": "10Gi"}}}
+    monkeypatch.setattr(O, "_helm_values", lambda r, ns: values[r])
+    caps = {"a": "20Gi", "b": "20Gi", "c": "100Gi", "d": "10Gi"}
+    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: caps[r])
+    r = O.sync_suspension("ns", dry_run=True)
+    assert r["ecarts"] == {"a": {"global.suspend": "true"},
+                           "c": {"persistence.size": "100Gi"}}
 
 
-def test_sync_suspension_repairs_resized_volume(monkeypatch):
+def test_sync_applies_each_gap_with_helm(monkeypatch):
     monkeypatch.setattr(O, "_helm_releases", lambda ns: [
-        {"name": "g", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"}])
-    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {"g-jupyter-pytorch-gpu": 0})
-    monkeypatch.setattr(O, "_helm_suspended", lambda r, ns: False)
-    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "100Gi")
-    appels = []
+        {"name": "x", "chart": "jupyter-python-2.5.6", "status": "deployed"}])
+    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {"x-jupyter-python": 0})
+    monkeypatch.setattr(O, "_helm_values", lambda r, ns: {"persistence": {"size": "10Gi"}})
+    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "50Gi")
+    seen = []
+    monkeypatch.setattr(O, "helm_upgrade_values",
+                        lambda rel, ns, sets: seen.append((rel, sets)) or (True, ""))
+    assert O.sync_suspension("ns")["synchronisees"] == ["x"]
+    assert seen == [("x", {"global.suspend": "true", "persistence.size": "50Gi"})]
 
-    def fake(release, ns, sets):
-        appels.append(dict(sets))
-        if "persistence.size" not in sets:
-            return False, 'spec.resources.requests.storage: Forbidden: field can not be less than status.capacity'
-        return True, ""
 
-    monkeypatch.setattr(O, "helm_upgrade_values", fake)
-    r = O.sync_suspension("ns")
-    assert r["synchronisees"] == ["g"] and r["echecs"] == []
-    assert appels[-1] == {"global.suspend": "true", "persistence.size": "100Gi"}
+def test_bytes_quantities():
+    assert O._bytes("20Gi") == 20 * 2 ** 30 and O._bytes("1Ti") == 2 ** 40
+    assert O._bytes("") == 0 and O._bytes("n/a") == 0
 
 
 def test_gpu_suspend_realigns_volume_then_retries(monkeypatch):

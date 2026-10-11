@@ -196,7 +196,8 @@ def _statefulset_replicas(namespace: str) -> dict[str, int]:
             for i in json.loads(out).get("items", [])}
 
 
-def _helm_suspended(release: str, namespace: str) -> bool:
+def _helm_values(release: str, namespace: str) -> dict:
+    """Valeurs effectives de la release (`helm get values -a`)."""
     import json
     import subprocess
     from ._helm import find_helm, helm_env
@@ -204,9 +205,22 @@ def _helm_suspended(release: str, namespace: str) -> bool:
                         "-a", "-o", "json"], capture_output=True, text=True,
                        timeout=30, env=helm_env())
     try:
-        return bool(json.loads(r.stdout or "{}").get("global", {}).get("suspend"))
+        return json.loads(r.stdout or "{}")
     except Exception:
-        return False
+        return {}
+
+
+def _helm_suspended(release: str, namespace: str) -> bool:
+    return bool(_helm_values(release, namespace).get("global", {}).get("suspend"))
+
+
+_UNITS = {"Ki": 2 ** 10, "Mi": 2 ** 20, "Gi": 2 ** 30, "Ti": 2 ** 40}
+
+
+def _bytes(q: str) -> int:
+    """Quantité Kubernetes (`20Gi`) en octets ; 0 si illisible."""
+    m = re.fullmatch(r"(\d+)(Ki|Mi|Gi|Ti)?", (q or "").strip())
+    return int(m.group(1)) * _UNITS.get(m.group(2) or "", 1) if m else 0
 
 
 def helm_upgrade_values(release: str, namespace: str,
@@ -253,15 +267,18 @@ def pvc_capacity(release: str, namespace: str) -> str:
 
 def sync_suspension(namespace: str, releases: list[str] | None = None,
                     dry_run: bool = False) -> dict:
-    """Aligne l'état Helm sur le cluster pour les pods suspendus à la main.
+    """Aligne l'état Helm sur le cluster pour les pods modifiés hors Helm.
 
-    Un pod mis à 0 par `kubectl scale` garde `global.suspend=false` : Onyxia
-    l'affiche « Démarrage du conteneur » à tort. On pose alors suspend=true (le
-    nombre de réplicas reste 0, aucun pod n'est touché).
+    Deux écarts, corrigés indépendamment (réplicas et pods ne sont jamais touchés) :
+    - pod mis à 0 par `kubectl scale` : `global.suspend` reste false et Onyxia
+      l'affiche « Démarrage du conteneur » → suspend=true ;
+    - volume agrandi par `kubectl patch pvc` : `persistence.size` reste plus petit
+      que la capacité et Helm refuse tout upgrade (Suspendre/Reprendre) →
+      persistence.size = capacité réelle.
     """
     replicas = _statefulset_replicas(namespace)
     wanted = set(releases) if releases else None
-    todo, skipped = [], []
+    todo: list[tuple[str, dict]] = []
     for r in _helm_releases(namespace):
         chart = r.get("chart", "")
         base = next((c for c in INTERACTIVE_CHARTS if chart.startswith(c + "-")), "")
@@ -269,29 +286,26 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
             continue
         if wanted is not None and r["name"] not in wanted:
             continue
+        values = _helm_values(r["name"], namespace)
+        sets: dict[str, str] = {}
         sts = replicas.get(f"{r['name']}-{base}")
-        if sts is None or sts > 0:
-            continue                       # pas de StatefulSet, ou pod actif
-        if _helm_suspended(r["name"], namespace):
-            continue                       # déjà cohérent
-        todo.append((r["name"], base, chart[len(base) + 1:]))
+        if sts == 0 and not values.get("global", {}).get("suspend"):
+            sets["global.suspend"] = "true"
+        cap = pvc_capacity(r["name"], namespace)
+        if cap and _bytes(cap) > _bytes(str(values.get("persistence", {}).get("size", ""))):
+            sets["persistence.size"] = cap
+        if sets:
+            todo.append((r["name"], sets))
     if dry_run:
-        return {"dry_run": True, "a_synchroniser": [t[0] for t in todo]}
-    done, failed = [], []
-    skipped: list[dict] = []
-    for name, base, version in todo:
-        ok, err = helm_upgrade_values(name, namespace, {"global.suspend": "true"})
-        if not ok and "status.capacity" in err:
-            # Volume agrandi hors Helm (kubectl) : aligner persistence.size dessus.
-            cap = pvc_capacity(name, namespace)
-            if cap:
-                ok, err = helm_upgrade_values(
-                    name, namespace,
-                    {"global.suspend": "true", "persistence.size": cap})
+        return {"dry_run": True, "a_synchroniser": [t[0] for t in todo],
+                "ecarts": {n: s for n, s in todo}}
+    done, failed, details = [], [], []
+    for name, sets in todo:
+        ok, err = helm_upgrade_values(name, namespace, sets)
         (done if ok else failed).append(name)
         if not ok:
-            skipped.append({name: err[-120:]})
-    return {"synchronisees": done, "echecs": failed, "details_echecs": skipped}
+            details.append({name: err[-120:]})
+    return {"synchronisees": done, "echecs": failed, "details_echecs": details}
 
 
 def adopt(namespace: str, releases: list[str] | None = None,
