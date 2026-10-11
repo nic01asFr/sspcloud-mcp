@@ -26,8 +26,11 @@ from . import transports as T
 
 GPU_CHART = "jupyter-pytorch-gpu"
 _PROJ_PREFIX = "proj-"
-# statefulset helm = {release}-{chart} ; release = proj-{name}-gpu
-_STS_RE = re.compile(rf"^{_PROJ_PREFIX}(?P<proj>.+)-gpu-{re.escape(GPU_CHART)}$")
+# statefulset helm = {release}-{chart} ; release = proj-{name}-gpu (canonique).
+# Les releases historiques `proj-{name}` (sans -gpu) avec le chart GPU tiennent
+# aussi le slot : elles doivent être vues, sinon le slot paraît libre à tort.
+_STS_RE = re.compile(
+    rf"^{_PROJ_PREFIX}(?P<proj>.+?)(?:-gpu)?-{re.escape(GPU_CHART)}$")
 
 _lock = threading.Lock()
 _watchdog_started = False
@@ -45,6 +48,12 @@ def gpu_statefulset(project: str) -> str:
 
 def gpu_pod(project: str) -> str:
     return f"{gpu_statefulset(project)}-0"
+
+
+def release_of_statefulset(statefulset: str) -> str:
+    """Release Helm d'un StatefulSet de chart GPU ({release}-{chart})."""
+    suffix = f"-{GPU_CHART}"
+    return statefulset[:-len(suffix)] if statefulset.endswith(suffix) else statefulset
 
 
 def project_of(statefulset: str) -> str | None:
@@ -157,10 +166,9 @@ def _helm_suspend(statefulset: str, namespace: str, suspended: bool) -> bool:
     broker). Version du chart conservée : aucune dérive de valeurs.
     """
     import json
-    project = project_of(statefulset)
-    if project is None:
+    if project_of(statefulset) is None:
         return False
-    release = gpu_release(project)
+    release = release_of_statefulset(statefulset)
     try:
         from ._helm import find_helm, ensure_helm_repo, helm_env
         helm = find_helm()
@@ -361,10 +369,20 @@ def release(namespace: str, project: str | None = None) -> dict:
     """Scale 0 le pod GPU actif (ou celui du projet) → libère le slot."""
     with _lock:
         if project:
+            # Toutes les releases du projet (canonique et historique) à replicas>0.
+            active = [x for x in list_gpu_statefulsets(namespace)
+                      if x["project"] == project and x["replicas"] > 0]
+            if active:
+                methods = {x["statefulset"]: _suspend(x["statefulset"], namespace, True)
+                           for x in active}
+                return {"released": project,
+                        "statefulset": active[0]["statefulset"],
+                        "method": next(iter(methods.values())),
+                        "statefulsets": list(methods)}
             sts = gpu_statefulset(project)
             if _sts_exists(sts, namespace):
-                method = _suspend(sts, namespace, True)
-                return {"released": project, "statefulset": sts, "method": method}
+                return {"released": project, "statefulset": sts,
+                        "note": "déjà suspendu"}
             return {"released": None, "note": f"aucun statefulset {sts}"}
         holder = current_holder(namespace)
         if not holder:

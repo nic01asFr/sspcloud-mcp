@@ -109,3 +109,16 @@ def test_contract_reports_missing_statefulset(monkeypatch):
     monkeypatch.setattr(T, "kubectl", lambda *a, **k: (1, "", "not found"))
     r = G.contract("demo", "ns")
     assert r["conforme"] is False and r["checks"]["statefulset"]["ok"] is False
+
+
+def test_legacy_gpu_statefulsets_hold_the_slot():
+    from sspcloud_mcp import gpu_broker as G
+    assert G.project_of("proj-depth-models-gpu-jupyter-pytorch-gpu") == "depth-models"
+    # release historique sans suffixe -gpu : même projet, doit tenir le slot
+    assert G.project_of("proj-depth-models-jupyter-pytorch-gpu") == "depth-models"
+    assert G.project_of("proj-surfac2e-reco-jupyter-pytorch-gpu") == "surfac2e-reco"
+    # prod / hors périmètre : jamais géré
+    assert G.project_of("zebra-gpu-bridge-jupyter-python") is None
+    assert G.project_of("geoai-gpu-jupyter-pytorch-gpu") is None
+    assert G.release_of_statefulset(
+        "proj-depth-models-jupyter-pytorch-gpu") == "proj-depth-models"
