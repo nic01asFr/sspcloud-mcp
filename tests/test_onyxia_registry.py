@@ -286,3 +286,35 @@ def test_sync_heals_failed_release(monkeypatch):
     monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "100Gi")
     r = O.sync_suspension("ns", dry_run=True)
     assert list(r["ecarts"]) == ["f"]          # jamais une release en cours d'upgrade
+
+
+def _fake_helm(monkeypatch, replicas):
+    import subprocess
+    cmds = []
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "r", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "failed"}])
+    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: replicas)
+    monkeypatch.setattr("sspcloud_mcp._helm.find_helm", lambda: "helm")
+    monkeypatch.setattr("sspcloud_mcp._helm.ensure_helm_repo", lambda *a: None)
+    monkeypatch.setattr("sspcloud_mcp._helm.helm_env", lambda: {})
+
+    class R:
+        returncode, stderr = 0, ""
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: cmds.append(cmd) or R())
+    return cmds
+
+
+def test_upgrade_never_changes_pod_state_by_accident(monkeypatch):
+    # pod suspendu (0 réplica) : un upgrade de volume doit rester suspendu
+    cmds = _fake_helm(monkeypatch, {"r-jupyter-pytorch-gpu": 0})
+    assert O.helm_upgrade_values("r", "ns", {"persistence.size": "100Gi"})[0]
+    assert "global.suspend=true" in cmds[0] and "persistence.size=100Gi" in cmds[0]
+    # pod actif : il le reste
+    cmds = _fake_helm(monkeypatch, {"r-jupyter-pytorch-gpu": 1})
+    O.helm_upgrade_values("r", "ns", {"persistence.size": "100Gi"})
+    assert "global.suspend=false" in cmds[0]
+    # demande explicite respectée
+    cmds = _fake_helm(monkeypatch, {"r-jupyter-pytorch-gpu": 1})
+    O.helm_upgrade_values("r", "ns", {"global.suspend": "true"})
+    assert "global.suspend=true" in cmds[0]

@@ -229,6 +229,8 @@ def helm_upgrade_values(release: str, namespace: str,
 
     Retourne (ok, message d'erreur). Sert à garder Helm cohérent avec le cluster
     (suspend, taille du volume) pour que les boutons d'Onyxia restent utilisables.
+    Sauf demande explicite (`global.suspend` dans `sets`), l'état de suspension du
+    pod est conservé tel qu'il est sur le cluster.
     """
     import subprocess
     from ._helm import find_helm, ensure_helm_repo, helm_env
@@ -243,6 +245,14 @@ def helm_upgrade_values(release: str, namespace: str,
         helm = find_helm()
         ensure_helm_repo(
             helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
+        sets = dict(sets)
+        if "global.suspend" not in sets:
+            # Un upgrade ne doit jamais démarrer ni arrêter un pod. Sur une release
+            # `failed`, --reuse-values reprend les valeurs de la dernière révision
+            # *déployée* : on fige donc la suspension sur l'état réel du pod.
+            n = _statefulset_replicas(namespace).get(f"{release}-{base}")
+            if n is not None:
+                sets["global.suspend"] = "true" if n == 0 else "false"
         cmd = [helm, "upgrade", release, f"inseefrlab/{base}", "-n", namespace,
                "--version", chart[len(base) + 1:], "--reuse-values"]
         for k, v in sets.items():
