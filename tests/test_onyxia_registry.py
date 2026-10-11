@@ -122,3 +122,22 @@ def test_legacy_gpu_statefulsets_hold_the_slot():
     assert G.project_of("geoai-gpu-jupyter-pytorch-gpu") is None
     assert G.release_of_statefulset(
         "proj-depth-models-jupyter-pytorch-gpu") == "proj-depth-models"
+
+
+REAL_NOTES = """### Service access
+
+- Your service Jupyter (Python) is not exposed on the internet.
+`kubectl port-forward service/p-jupyter-python <local-port>:8888`
+and then use the following URL with your browser: `http://localhost:<local-port>`
+- Your user name: onyxia
+- Your password: a2e5b6bf4264e890830198e334feaa18
+"""
+
+
+def test_parse_notes_real_chart_format():
+    r = O.parse_notes(REAL_NOTES)
+    assert "a2e5b6bf4264e890830198e334feaa18" not in r["text"]
+    assert r["has_password"] is True and "password" not in r
+    assert r["open_url"] == "" and r["urls"] == []   # modèle localhost ignoré
+    assert O.parse_notes(REAL_NOTES, reveal=True)["password"] == \
+        "a2e5b6bf4264e890830198e334feaa18"

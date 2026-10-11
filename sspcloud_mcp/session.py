@@ -335,10 +335,15 @@ class SessionManager:
         """
         s = self.get(session_id)
         s.touch()
+        # Le dossier projet n'existe pas sur un pod frais : le créer (sinon
+        # subprocess échoue avant d'exécuter la commande), repli sur le cwd.
         wrap = (
-            "import subprocess as _sp, json as _json\n"
+            "import os, subprocess as _sp, json as _json\n"
+            f"_wd = {s.workdir!r}\n"
+            "try:\n    os.makedirs(_wd, exist_ok=True)\n"
+            "except Exception:\n    _wd = os.getcwd()\n"
             f"_r = _sp.run({command!r}, shell=True, capture_output=True,"
-            f" text=True, cwd={s.workdir!r})\n"
+            " text=True, cwd=_wd)\n"
             "print('__PMCP__' + _json.dumps("
             "{'rc': _r.returncode, 'stdout': _r.stdout, 'stderr': _r.stderr}))\n"
         )

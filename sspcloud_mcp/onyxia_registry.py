@@ -75,8 +75,9 @@ def is_managed(release: str, namespace: str) -> bool:
         return False
 
 
-_URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
-_PWD_RE = re.compile(r"(?im)^(\s*password\s*:\s*)(\S+)")
+_URL_RE = re.compile(r"https?://[^\s)>\]\"'`]+")
+# « password: x », « Your password: x », « **Password**: x » (formats des charts)
+_PWD_RE = re.compile(r"(?i)(password\W{0,4}\s*:\s*\W{0,2})([^\s`*]+)")
 _NOTES_MAX = 3000
 
 
@@ -90,6 +91,8 @@ def parse_notes(text: str, reveal: bool = False) -> dict:
     urls: list[str] = []
     for u in _URL_RE.findall(text):
         u = u.rstrip(".,;")
+        if "<" in u or ">" in u:      # modèle `http://localhost:<local-port>`
+            continue
         if u not in urls:
             urls.append(u)
     m = _PWD_RE.search(text)
