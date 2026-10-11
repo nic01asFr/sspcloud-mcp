@@ -21,6 +21,7 @@ import subprocess
 import threading
 import time
 
+from . import onyxia_registry as O
 from . import transports as T
 
 GPU_CHART = "jupyter-pytorch-gpu"
@@ -138,6 +139,102 @@ def _scale(statefulset: str, namespace: str, replicas: int) -> None:
               namespace=namespace, timeout=20)
 
 
+def _replicas(statefulset: str, namespace: str) -> int | None:
+    rc, out, _ = T.kubectl("get", "statefulset", statefulset, "-o",
+                           "jsonpath={.spec.replicas}", namespace=namespace,
+                           timeout=10)
+    try:
+        return int(out.strip()) if rc == 0 else None
+    except ValueError:
+        return None
+
+
+def _helm_suspend(statefulset: str, namespace: str, suspended: bool) -> bool:
+    """Suspend/reprend par `helm upgrade --reuse-values --set global.suspend=…`.
+
+    Même geste que le bouton Suspendre/Reprendre d'Onyxia : l'état Helm reste
+    cohérent avec le cluster (un « Reprendre » ultérieur ne contredit pas le
+    broker). Version du chart conservée : aucune dérive de valeurs.
+    """
+    import json
+    project = project_of(statefulset)
+    if project is None:
+        return False
+    release = gpu_release(project)
+    try:
+        from ._helm import find_helm, ensure_helm_repo, helm_env
+        helm = find_helm()
+        env = helm_env()
+        ls = subprocess.run([helm, "list", "-n", namespace, "-f", f"^{release}$",
+                             "-o", "json"], capture_output=True, text=True,
+                            timeout=30, env=env)
+        chart = (json.loads(ls.stdout or "[]") or [{}])[0].get("chart", "")
+        prefix = f"{GPU_CHART}-"
+        if ls.returncode != 0 or not chart.startswith(prefix):
+            return False
+        ensure_helm_repo(
+            helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
+        up = subprocess.run(
+            [helm, "upgrade", release, f"inseefrlab/{GPU_CHART}", "-n", namespace,
+             "--version", chart[len(prefix):], "--reuse-values",
+             "--set", f"global.suspend={'true' if suspended else 'false'}"],
+            capture_output=True, text=True, timeout=90, env=env)
+        return up.returncode == 0 and _replicas(statefulset, namespace) == (
+            0 if suspended else 1)
+    except Exception:
+        return False
+
+
+def _suspend(statefulset: str, namespace: str, suspended: bool) -> str:
+    """Suspend (replicas 0) ou reprend (1) un pod GPU. Retourne la méthode
+    utilisée : "helm" (état Onyxia cohérent) ou "scale" (repli)."""
+    if _helm_suspend(statefulset, namespace, suspended):
+        return "helm"
+    _scale(statefulset, namespace, 0 if suspended else 1)
+    return "scale"
+
+
+def contract(project: str, namespace: str) -> dict:
+    """Vérifie qu'un pod GPU `proj-<projet>-gpu` respecte le contrat du broker.
+
+    Chaque contrôle est {ok, detail}. Un pod non conforme ne doit pas être
+    arbitré (nom, GPU demandé, PVC, release Helm, visibilité Onyxia).
+    """
+    import json
+    sts = gpu_statefulset(project)
+    checks: dict[str, dict] = {}
+    rc, out, _ = T.kubectl("get", "statefulset", sts, "-o", "json",
+                           namespace=namespace, timeout=15)
+    if rc != 0:
+        return {"project": project, "statefulset": sts, "conforme": False,
+                "checks": {"statefulset": {"ok": False, "detail": "introuvable"}}}
+    obj = json.loads(out)
+    checks["statefulset"] = {"ok": True, "detail": f"replicas={obj['spec'].get('replicas')}"}
+    reqs = [c.get("resources", {}).get("requests", {})
+            for c in obj["spec"]["template"]["spec"].get("containers", [])]
+    checks["gpu_demande"] = {"ok": any("nvidia.com/gpu" in k for r in reqs for k in r),
+                             "detail": "requests nvidia.com/gpu"}
+    claims = obj["spec"].get("volumeClaimTemplates") or []
+    volumes = obj["spec"]["template"]["spec"].get("volumes") or []
+    has_pvc = bool(claims) or any("persistentVolumeClaim" in v for v in volumes)
+    checks["pvc"] = {"ok": has_pvc, "detail": "état conservé à la suspension"}
+    checks["release_helm"] = {
+        "ok": T.kubectl("get", "secret", "-l",
+                        f"owner=helm,name={gpu_release(project)}",
+                        "-o", "name", namespace=namespace, timeout=15)[1].strip() != "",
+        "detail": f"release {gpu_release(project)}"}
+    checks["visible_onyxia"] = {
+        "ok": T.kubectl("get", "secret", O.secret_name(gpu_release(project)),
+                        namespace=namespace, timeout=10)[0] == 0,
+        "detail": O.secret_name(gpu_release(project))}
+    checks["gere_par_le_service"] = {
+        "ok": O.is_managed(gpu_release(project), namespace),
+        "detail": "désinstallable par le service"}
+    essential = ("statefulset", "gpu_demande", "pvc", "release_helm")
+    return {"project": project, "statefulset": sts,
+            "conforme": all(checks[k]["ok"] for k in essential), "checks": checks}
+
+
 def _sts_exists(statefulset: str, namespace: str) -> bool:
     rc, _, _ = T.kubectl("get", "statefulset", statefulset,
                          namespace=namespace, timeout=10)
@@ -194,6 +291,8 @@ def _helm_install_gpu(project: str, namespace: str, password: str) -> None:
         raise MCPToolError("GPU_HELM_FAILED",
                            f"helm install GPU échoué : {r.stderr[-200:]}",
                            "Vérifiez le quota GPU (/my-lab/quota) et le RBAC.")
+    # Visible dans Onyxia « Mes services » (sinon la release reste invisible).
+    O.register(gpu_release(project), namespace, f"{project} (GPU, MCP)")
 
 
 # ── Bascule du slot ───────────────────────────────────────────────────────────
@@ -223,7 +322,7 @@ def ensure_slot(project: str, namespace: str, *, preempt: bool = True,
 
         # Préemption : libérer le slot occupé par un AUTRE projet.
         if preempt and holder and holder["project"] != project:
-            _scale(holder["statefulset"], namespace, 0)
+            _suspend(holder["statefulset"], namespace, True)
             _wait_pod_terminated(f"{holder['statefulset']}-0", namespace,
                                  timeout_s=min(120, timeout_s))
             switched = True
@@ -241,7 +340,7 @@ def ensure_slot(project: str, namespace: str, *, preempt: bool = True,
 
         # Amener la cible à replicas=1 (install si absente).
         if _sts_exists(target_sts, namespace):
-            _scale(target_sts, namespace, 1)
+            _suspend(target_sts, namespace, False)
         else:
             _helm_install_gpu(project, namespace,
                               password or _secrets.token_hex(16))
@@ -264,14 +363,15 @@ def release(namespace: str, project: str | None = None) -> dict:
         if project:
             sts = gpu_statefulset(project)
             if _sts_exists(sts, namespace):
-                _scale(sts, namespace, 0)
-                return {"released": project, "statefulset": sts}
+                method = _suspend(sts, namespace, True)
+                return {"released": project, "statefulset": sts, "method": method}
             return {"released": None, "note": f"aucun statefulset {sts}"}
         holder = current_holder(namespace)
         if not holder:
             return {"released": None, "note": "aucun pod GPU actif"}
-        _scale(holder["statefulset"], namespace, 0)
-        return {"released": holder["project"], "statefulset": holder["statefulset"]}
+        method = _suspend(holder["statefulset"], namespace, True)
+        return {"released": holder["project"], "statefulset": holder["statefulset"],
+                "method": method}
 
 
 # ── Statut + utilisation ──────────────────────────────────────────────────────

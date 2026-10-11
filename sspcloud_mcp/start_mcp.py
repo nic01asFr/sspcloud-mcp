@@ -6,7 +6,8 @@ relancé à chaque démarrage du pod (hook Jupyter) sans configuration externe.
   namespace : SSPCLOUD_NAMESPACE ou le ServiceAccount monté.
   username  : ONYXIA_USER ou dérivé du namespace (user-<X> → X).
   bearer    : BEARER_IN, sinon fichier PVC ~/.mcp_bearer (généré+persisté sinon).
-  URL       : PASSERELLE_MCP_PUBLIC_URL ou https://<ns>-passerelle-mcp…
+  URL       : PASSERELLE_MCP_PUBLIC_URL ou https://<ns>-mcp… (même convention
+              que scripts/mcp_deploy.sh et mcp_expose.sh : MCP_NAME=mcp).
 """
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ env.update({
     "PASSERELLE_MCP_BEARER": _bearer,
     "PASSERELLE_MCP_PUBLIC_URL": os.environ.get(
         "PASSERELLE_MCP_PUBLIC_URL",
-        f"https://{_ns}-passerelle-mcp.user.lab.sspcloud.fr"),
+        f"https://{_ns}-mcp.user.lab.sspcloud.fr"),
     "PASSERELLE_LOCAL_JUPYTER": os.getenv("PASSERELLE_LOCAL_JUPYTER",
                                           "http://localhost:8888"),
     "SSPCLOUD_NAMESPACE": _ns,

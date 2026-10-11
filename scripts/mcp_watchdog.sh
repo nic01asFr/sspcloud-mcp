@@ -15,9 +15,9 @@ NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || 
 USER=${NS#user-}
 BEARER=$(cat /home/onyxia/work/.mcp_bearer 2>/dev/null)
 # URL publique : fichier .mcp_public_url (posé par mcp_expose.sh en self-service),
-# sinon convention …-passerelle-mcp (instance de référence).
+# sinon convention …-mcp (MCP_NAME=mcp, comme mcp_deploy.sh et mcp_expose.sh).
 PUBURL=$(cat /home/onyxia/work/.mcp_public_url 2>/dev/null)
-[ -z "$PUBURL" ] && PUBURL="https://${NS}-passerelle-mcp.user.lab.sspcloud.fr"
+[ -z "$PUBURL" ] && PUBURL="https://${NS}-mcp.user.lab.sspcloud.fr"
 cd /home/onyxia/work || exit 0
 
 while true; do

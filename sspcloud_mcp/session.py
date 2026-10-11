@@ -25,6 +25,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import onyxia_registry as O
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
 from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
@@ -148,15 +149,28 @@ class SessionManager:
             s.pod = pod
             if not T.pod_running(pod, namespace):
                 raise pod_unreachable(pod, "Pod non Running.")
-            port = T.jupyter_port(pod, namespace)
+            loop = asyncio.get_running_loop()
             if T.in_cluster():
                 # Accès pod-to-pod direct par IP — pas de port-forward
                 # (le port-forward ne fait pas circuler les frames WS du kernel).
                 ip = T.pod_ip(pod, namespace)
                 if not ip:
                     raise pod_unreachable(pod, "IP du pod introuvable.")
+                if launch_pwd:
+                    # Pod qu'on vient de lancer : attendre JupyterLab (hors boucle),
+                    # sous le plafond d'un appel client (~60 s). Au-delà, le kernel
+                    # réessaie lui-même (KernelClient.start, warmup).
+                    try:
+                        port = await loop.run_in_executor(
+                            None, lambda: T.wait_jupyter(pod, namespace, ip, 25))
+                    except Exception:
+                        port = 8888
+                else:
+                    port = await loop.run_in_executor(
+                        None, lambda: T.jupyter_port(pod, namespace, ip))
                 s.base_url = f"http://{ip}:{port}"
             else:
+                port = T.jupyter_port(pod, namespace)
                 s._pf = T.start_port_forward(pod, namespace, remote_port=port)
                 s.base_url = s._pf.base_url()
             # Token = le vrai $PASSWORD du pod (get_jupyter_token le lit), fallback
@@ -185,11 +199,14 @@ class SessionManager:
         if gpu:
             cmd += ["--set-string", "resources.requests.nvidia\\.com/gpu=1",
                     "--set-string", "resources.limits.nvidia\\.com/gpu=1"]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         r = await loop.run_in_executor(None, lambda: subprocess.run(
             cmd, capture_output=True, text=True, timeout=180, env=helm_env()))
         if r.returncode != 0:
             raise pod_unreachable(release, f"helm échoué : {r.stderr[-200:]}")
+        # Visible dans Onyxia « Mes services » (sinon la release reste invisible).
+        await loop.run_in_executor(
+            None, lambda: O.register(release, namespace, f"{name} (MCP)"))
         pod = f"{release}-{chart}-0"
         # Attente readiness (cold start CPU ~1min, GPU ~5-8min).
         deadline = time.time() + (600 if gpu else 180)
@@ -206,6 +223,15 @@ class SessionManager:
         kc = KernelClient(s.base_url, token=s.token)
         await kc.start()
         s._kernel = kc
+        # Le kernel démarre dans la racine de Jupyter : l'aligner sur le workdir
+        # de la session (comme exec bash et list_files), s'il existe.
+        if s.workdir and s.workdir != _DEFAULT_WORKDIR:
+            try:
+                await kc.execute(
+                    f"import os\n_d = {s.workdir!r}\n"
+                    "os.path.isdir(_d) and os.chdir(_d)\ndel _d", timeout=10)
+            except Exception:
+                pass
         return kc
 
     async def stop(self, session_id: str, *, uninstall: bool = False) -> dict:
@@ -222,11 +248,24 @@ class SessionManager:
             released["port_forward"] = True
         if uninstall and s.pod:
             import subprocess
-            from ._helm import helm_env
-            # nom de release = session_id par convention de _launch
-            subprocess.run(["helm", "uninstall", session_id, "-n", s.namespace],
-                           capture_output=True, timeout=60, env=helm_env())
-            released["helm"] = True
+            from ._helm import find_helm, helm_env
+            # Release déduite du POD (pas du session_id : une session rattachée ou
+            # GPU a un id sans rapport). Seules les releases lancées par le service
+            # (marqueur Onyxia) sont désinstallables : jamais un pod de l'utilisateur.
+            release = O.release_of_pod(s.pod)
+            if not release or not O.is_managed(release, s.namespace):
+                released["helm_refused"] = (
+                    f"release de {s.pod} non lancée par le service : "
+                    "désinstallation refusée (supprimez-la depuis Onyxia).")
+            else:
+                r = subprocess.run(
+                    [find_helm(), "uninstall", release, "-n", s.namespace],
+                    capture_output=True, text=True, timeout=60, env=helm_env())
+                released["helm"] = r.returncode == 0
+                if r.returncode == 0:
+                    O.unregister(release, s.namespace)
+                else:
+                    released["helm_error"] = r.stderr.strip()[-200:]
         del self._sessions[session_id]
         self._save()
         return released

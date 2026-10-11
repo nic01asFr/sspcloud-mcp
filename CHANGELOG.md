@@ -1,5 +1,19 @@
 # Changelog
 
+## Non publié
+
+- **Fix pods neufs** : le WebSocket kernel négocie le sous-protocole
+  `v1.kernel.websocket.jupyter.org` (jupyter_server >= 2.21 coupait la connexion).
+- `jupyter_port` vérifie chaque port candidat ; un pod fraîchement lancé attend JupyterLab.
+- **Visible dans Onyxia** : les pods lancés par le service (CPU et GPU) créent le Secret
+  `sh.onyxia.release.v1.<release>` ; `session_stop(uninstall=true)` déduit la release du pod
+  et ne désinstalle que celles lancées par le service.
+- **`pod_info`** (26 outils) : NOTES.txt de la release (URL Ouvrir, mot de passe masqué) ;
+  `project_start` et `gpu_switch` renvoient aussi `acces`.
+- **GPU** : suspension/reprise par `helm upgrade --reuse-values --set global.suspend`
+  (repli `kubectl scale`) ; `gpu_status(project=...)` contrôle la conformité au contrat.
+- URLs par défaut `…-mcp` (start_mcp.py, mcp_watchdog.sh), comme mcp_deploy.sh.
+
 ## Chart 0.4.0
 
 Installation alignée sur QGIS et Grist Coder : image **`ghcr.io/nic01asfr/sspcloud-mcp`**,

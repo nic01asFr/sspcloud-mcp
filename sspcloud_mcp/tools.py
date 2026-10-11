@@ -16,6 +16,7 @@ from . import repo_sync
 from . import transports as T
 from . import deploy_ops as D
 from . import gpu_broker as G
+from . import onyxia_registry as O
 from .errors import MCPToolError
 from .session import SYNC_BUDGET_S
 
@@ -163,6 +164,11 @@ async def pull_artifact(mgr, args: dict) -> dict:
 
 
 async def gpu_status(mgr, args: dict) -> dict:
+    # Avec project : contrôle de conformité au contrat du broker (sans session).
+    if args.get("project") and not args.get("session_id"):
+        ns = _ns(args)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, lambda: G.contract(args["project"], ns))
     # Sans session_id : état du SLOT GPU (quel projet le détient, util%).
     if not args.get("session_id"):
         ns = _ns(args)
@@ -195,9 +201,10 @@ async def gpu_switch(mgr, args: dict) -> dict:
     s.workdir = f"/home/onyxia/work/projects/{project}"
     s.repo_path = s.repo_path or s.workdir
     mgr._save()
-    return {"session_id": s.id, "project": project, "pod": info["pod"],
-            "gpu": True, "base_url": s.base_url, "workdir": s.workdir,
-            "switched": info.get("switched"), "reused": info.get("reused")}
+    return await _with_access(
+        {"session_id": s.id, "project": project, "pod": info["pod"],
+         "gpu": True, "base_url": s.base_url, "workdir": s.workdir,
+         "switched": info.get("switched"), "reused": info.get("reused")}, ns)
 
 
 async def gpu_release(mgr, args: dict) -> dict:
@@ -205,6 +212,47 @@ async def gpu_release(mgr, args: dict) -> dict:
     ns = _ns(args)
     return await asyncio.get_event_loop().run_in_executor(
         None, lambda: G.release(ns, args.get("project")))
+
+
+async def pod_info(mgr, args: dict) -> dict:
+    """Accès et service d'un pod : le NOTES.txt de sa release Helm (URL Ouvrir,
+    mot de passe masqué), son état et sa visibilité Onyxia."""
+    ns = _ns(args)
+    pod = args.get("pod", "")
+    if not pod and args.get("session_id"):
+        pod = mgr.get(args["session_id"]).pod
+    release = args.get("release") or O.release_of_pod(pod)
+    if not release:
+        raise MCPToolError("RELEASE_UNKNOWN",
+                           f"Release introuvable pour '{pod or '?'}'.",
+                           "Passez release=<nom> ou un pod de chart interactif "
+                           "(<release>-jupyter-python-0).")
+    loop = asyncio.get_event_loop()
+
+    def _collect() -> dict:
+        info = {"release": release, "pod": pod or f"{release}-?",
+                "namespace": ns,
+                "visible_onyxia": T.kubectl(
+                    "get", "secret", O.secret_name(release),
+                    namespace=ns, timeout=10)[0] == 0,
+                "gere_par_le_service": O.is_managed(release, ns),
+                "acces": O.notes(release, ns, bool(args.get("reveal", False)))}
+        if pod:
+            info["phase"] = T.kubectl(
+                "get", "pod", pod, "-o", "jsonpath={.status.phase}",
+                namespace=ns, timeout=10)[1].strip() or "inconnue"
+        return info
+
+    return await loop.run_in_executor(None, _collect)
+
+
+async def _with_access(result: dict, namespace: str) -> dict:
+    """Ajoute le résumé d'accès (NOTES.txt) au retour d'un lancement de pod."""
+    release = O.release_of_pod(result.get("pod", ""))
+    if release:
+        result["acces"] = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: O.notes(release, namespace))
+    return result
 
 
 async def session_stop(mgr, args: dict) -> dict:
@@ -256,7 +304,7 @@ async def project_start(mgr, args: dict) -> dict:
         "gpu": False,
         "attach_pod": "",  # force helm, pas in-cluster
     }
-    return await session_start(mgr, start_args)
+    return await _with_access(await session_start(mgr, start_args), _ns(args))
 
 
 async def service_scaffold(_mgr, args: dict) -> dict:
@@ -466,9 +514,18 @@ TOOLS: dict = {
            ["session_id", "path"])),
 
     "gpu_status": (gpu_status,
-        "État du GPU. Sans session_id : état du SLOT (quel projet le détient, "
-        "util%, VRAM). Avec session_id : nvidia-smi du pod de la session.",
-        _s({"session_id": _STR, "namespace": _STR}, [])),
+        "État du GPU. Sans argument : état du SLOT (quel projet le détient, util%, "
+        "VRAM). Avec session_id : nvidia-smi du pod de la session. Avec project : "
+        "contrôle de conformité du pod GPU au contrat du broker (nom, GPU demandé, "
+        "PVC, release Helm, visibilité Onyxia).",
+        _s({"session_id": _STR, "project": _STR, "namespace": _STR}, [])),
+
+    "pod_info": (pod_info,
+        "Accès et service d'un pod lancé par Helm : résume son NOTES.txt (URL "
+        "Ouvrir, mot de passe masqué sauf reveal=true), son état et sa visibilité "
+        "dans Onyxia « Mes services ». Passez session_id, pod ou release.",
+        _s({"session_id": _STR, "pod": _STR, "release": _STR, "namespace": _STR,
+            "reveal": _BOOL}, [])),
 
     "gpu_switch": (gpu_switch,
         "Fait BASCULER le slot GPU unique vers le pod GPU du projet : scale ↑ sa "
@@ -497,7 +554,9 @@ TOOLS: dict = {
         _s({"project": _STR, "pod": _STR, "namespace": _STR, "session_id": _STR}, [])),
 
     "project_start": (project_start,
-        "Lance un pod helm dédié pour un projet (jupyter-python ou GPU).",
+        "Lance un pod helm dédié pour un projet (jupyter-python, ou GPU avec "
+        "gpu=true). Visible dans Onyxia « Mes services » ; retourne aussi `acces` "
+        "(NOTES.txt : URL, mot de passe masqué). `chart` n'est pas pris en compte.",
         _s({"project": _STR, "gpu": _BOOL, "chart": _STR, "namespace": _STR}, ["project"])),
 
     "service_scaffold": (service_scaffold,

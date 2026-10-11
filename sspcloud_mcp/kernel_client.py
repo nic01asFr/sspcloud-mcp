@@ -30,6 +30,9 @@ from datetime import datetime, timezone
 from .jupyter_protocol import decode_message, kernel_info_request
 
 
+_WS_SUBPROTOCOL = "v1.kernel.websocket.jupyter.org"
+
+
 def _encode_execute(code: str, session: str) -> tuple[bytes, str]:
     """Encode un execute_request et retourne (frame, msg_id).
 
@@ -159,9 +162,13 @@ class KernelClient:
         headers = {"Origin": self.origin}
         if self.token:
             headers["Authorization"] = f"token {self.token}"
+        # Le format binaire émis ici est le protocole v1 de Jupyter : il doit être
+        # négocié. jupyter_server >= 2.21 coupe sinon la connexion sans réponse
+        # ("no close frame") ; les versions antérieures l'acceptent aussi.
         # max_size=None : autoriser les gros display_data (images, DataFrames)
         self._ws = await websockets.connect(
             url, additional_headers=headers, open_timeout=30,
+            subprotocols=[_WS_SUBPROTOCOL],
             max_size=None, ping_interval=20, ping_timeout=20,
         )
         # Vérifie que le kernel répond (kernel_info) — draine le premier idle.

@@ -170,15 +170,59 @@ def local_jupyter_token() -> str:
     return os.getenv("JUPYTER_TOKEN", "") or os.getenv("PASSWORD", "")
 
 
-def jupyter_port(pod: str, namespace: str) -> int:
-    """Détecte le port d'écoute de JupyterLab dans le pod (défaut 8888)."""
+def jupyter_ports(pod: str, namespace: str) -> list[int]:
+    """Ports annoncés par `jupyter server list` (ordre d'apparition, sans doublon)."""
     rc, out, _ = exec_shell(pod, namespace, "jupyter server list 2>/dev/null",
                             timeout=20)
+    ports: list[int] = []
     if rc == 0:
-        m = re.search(r"https?://[^:]+:(\d+)/", out)
-        if m:
-            return int(m.group(1))
-    return 8888
+        for m in re.finditer(r"https?://[^:\s]+:(\d+)/", out):
+            p = int(m.group(1))
+            if p not in ports:
+                ports.append(p)
+    return ports
+
+
+def jupyter_alive(ip: str, port: int, timeout: float = 3.0) -> bool:
+    """True si un serveur Jupyter répond sur ip:port (GET /api, sans token)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{ip}:{port}/api", timeout=timeout) as r:
+            return r.status == 200 and b"version" in r.read(200)
+    except Exception:
+        return False
+
+
+def jupyter_port(pod: str, namespace: str, ip: str = "") -> int:
+    """Détecte le port d'écoute de JupyterLab dans le pod (défaut 8888).
+
+    Avec `ip` (accès pod-to-pod), chaque candidat — ports annoncés puis 8888 —
+    est vérifié : une entrée périmée de `jupyter server list` ne doit pas
+    envoyer la session vers un port mort.
+    """
+    candidates = jupyter_ports(pod, namespace)
+    if 8888 not in candidates:
+        candidates.append(8888)
+    if not ip:
+        return candidates[0]
+    for p in candidates:
+        if jupyter_alive(ip, p):
+            return p
+    return candidates[0]
+
+
+def wait_jupyter(pod: str, namespace: str, ip: str, timeout_s: int = 150) -> int:
+    """Attend que JupyterLab réponde (pod frais : Running ≠ serveur prêt).
+
+    Retourne le port prêt, ou lève pod_unreachable à l'expiration.
+    """
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        for p in (*jupyter_ports(pod, namespace), 8888):
+            if jupyter_alive(ip, p):
+                return p
+        time.sleep(4)
+    raise pod_unreachable(pod, f"JupyterLab ne répond pas après {timeout_s}s.")
 
 
 # ── Port-forward ──────────────────────────────────────────────────────────────
