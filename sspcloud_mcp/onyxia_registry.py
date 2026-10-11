@@ -269,6 +269,9 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
                     dry_run: bool = False) -> dict:
     """Aligne l'état Helm sur le cluster pour les pods modifiés hors Helm.
 
+    Les releases `failed` (upgrade refusé à cause du volume) sont aussi traitées : un
+    nouvel upgrade réussi les remet en `deployed`.
+
     Deux écarts, corrigés indépendamment (réplicas et pods ne sont jamais touchés) :
     - pod mis à 0 par `kubectl scale` : `global.suspend` reste false et Onyxia
       l'affiche « Démarrage du conteneur » → suspend=true ;
@@ -282,7 +285,7 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
     for r in _helm_releases(namespace):
         chart = r.get("chart", "")
         base = next((c for c in INTERACTIVE_CHARTS if chart.startswith(c + "-")), "")
-        if not base or r.get("status") != "deployed":
+        if not base or r.get("status") not in ("deployed", "failed"):
             continue
         if wanted is not None and r["name"] not in wanted:
             continue

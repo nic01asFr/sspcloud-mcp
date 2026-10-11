@@ -275,3 +275,14 @@ def test_gpu_suspend_realigns_volume_then_retries(monkeypatch):
     assert G._helm_suspend("proj-x-jupyter-pytorch-gpu", "ns", True) is True
     assert seen[0][0] == "proj-x"                      # release historique (sans -gpu)
     assert seen[-1][1] == {"global.suspend": "true", "persistence.size": "200Gi"}
+
+
+def test_sync_heals_failed_release(monkeypatch):
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "f", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "failed"},
+        {"name": "p", "chart": "jupyter-python-2.5.6", "status": "pending-upgrade"}])
+    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {})
+    monkeypatch.setattr(O, "_helm_values", lambda r, ns: {"persistence": {"size": "20Gi"}})
+    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "100Gi")
+    r = O.sync_suspension("ns", dry_run=True)
+    assert list(r["ecarts"]) == ["f"]          # jamais une release en cours d'upgrade
