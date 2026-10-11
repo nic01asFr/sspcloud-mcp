@@ -418,7 +418,7 @@ def status(namespace: str) -> dict:
     out = {
         "managed_holder": holder["project"] if holder else None,
         "external_holder": ext,                  # ex: zebra-gpu-bridge (prod)
-        "gpu_projects": [p["project"] for p in projects],
+        "gpu_projects": sorted({p["project"] for p in projects}),
         "quota": {"used": used, "limit": limit},
         "slot_free": holder is None and ext is None and (not limit or used < limit),
     }
