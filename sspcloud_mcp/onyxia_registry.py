@@ -209,6 +209,48 @@ def _helm_suspended(release: str, namespace: str) -> bool:
         return False
 
 
+def helm_upgrade_values(release: str, namespace: str,
+                        sets: dict[str, str]) -> tuple[bool, str]:
+    """`helm upgrade --reuse-values --set k=v…` à version de chart constante.
+
+    Retourne (ok, message d'erreur). Sert à garder Helm cohérent avec le cluster
+    (suspend, taille du volume) pour que les boutons d'Onyxia restent utilisables.
+    """
+    import subprocess
+    from ._helm import find_helm, ensure_helm_repo, helm_env
+    try:
+        rel = next((r for r in _helm_releases(namespace) if r["name"] == release), None)
+        if rel is None:
+            return False, "release introuvable"
+        chart = rel.get("chart", "")
+        base = next((c for c in INTERACTIVE_CHARTS if chart.startswith(c + "-")), "")
+        if not base:
+            return False, f"chart non géré : {chart}"
+        helm = find_helm()
+        ensure_helm_repo(
+            helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
+        cmd = [helm, "upgrade", release, f"inseefrlab/{base}", "-n", namespace,
+               "--version", chart[len(base) + 1:], "--reuse-values"]
+        for k, v in sets.items():
+            cmd += ["--set", f"{k}={v}"]
+        up = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
+                            env=helm_env())
+        return up.returncode == 0, up.stderr.strip()[-300:]
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def pvc_capacity(release: str, namespace: str) -> str:
+    """Capacité réelle du PVC de la release ('' si introuvable)."""
+    for base in INTERACTIVE_CHARTS:
+        rc, out, _ = T.kubectl("get", "pvc", f"{release}-{base}", "-o",
+                               "jsonpath={.status.capacity.storage}",
+                               namespace=namespace, timeout=15)
+        if rc == 0 and out.strip():
+            return out.strip()
+    return ""
+
+
 def sync_suspension(namespace: str, releases: list[str] | None = None,
                     dry_run: bool = False) -> dict:
     """Aligne l'état Helm sur le cluster pour les pods suspendus à la main.
@@ -217,8 +259,6 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
     l'affiche « Démarrage du conteneur » à tort. On pose alors suspend=true (le
     nombre de réplicas reste 0, aucun pod n'est touché).
     """
-    import subprocess
-    from ._helm import find_helm, ensure_helm_repo, helm_env
     replicas = _statefulset_replicas(namespace)
     wanted = set(releases) if releases else None
     todo, skipped = [], []
@@ -237,18 +277,20 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
         todo.append((r["name"], base, chart[len(base) + 1:]))
     if dry_run:
         return {"dry_run": True, "a_synchroniser": [t[0] for t in todo]}
-    helm = find_helm()
-    env = helm_env()
-    ensure_helm_repo(helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
     done, failed = [], []
+    skipped: list[dict] = []
     for name, base, version in todo:
-        up = subprocess.run(
-            [helm, "upgrade", name, f"inseefrlab/{base}", "-n", namespace,
-             "--version", version, "--reuse-values", "--set", "global.suspend=true"],
-            capture_output=True, text=True, timeout=90, env=env)
-        (done if up.returncode == 0 else failed).append(name)
-        if up.returncode != 0:
-            skipped.append({name: up.stderr.strip()[-120:]})
+        ok, err = helm_upgrade_values(name, namespace, {"global.suspend": "true"})
+        if not ok and "status.capacity" in err:
+            # Volume agrandi hors Helm (kubectl) : aligner persistence.size dessus.
+            cap = pvc_capacity(name, namespace)
+            if cap:
+                ok, err = helm_upgrade_values(
+                    name, namespace,
+                    {"global.suspend": "true", "persistence.size": cap})
+        (done if ok else failed).append(name)
+        if not ok:
+            skipped.append({name: err[-120:]})
     return {"synchronisees": done, "echecs": failed, "details_echecs": skipped}
 
 

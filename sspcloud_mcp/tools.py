@@ -396,6 +396,19 @@ def taille_octets(taille: str) -> int:
     return int(m.group(1)) * _UNITES[m.group(2)]
 
 
+def _sync_helm_size(pod: str, ns: str, size: str) -> str:
+    """Aligne `persistence.size` de la release Helm sur le volume agrandi.
+
+    Sans cela, Helm tenterait de réduire le PVC au prochain upgrade : Suspendre et
+    Reprendre (Onyxia ou service) échoueraient pour ce pod.
+    """
+    release = O.release_of_pod(pod)
+    if not release:
+        return "ignoré : pod hors chart interactif"
+    ok, err = O.helm_upgrade_values(release, ns, {"persistence.size": size})
+    return "persistence.size aligné" if ok else f"non synchronisé : {err[:150]}"
+
+
 def _volume_resize_sync(pod: str, ns: str, size: str, pvc: str, dry_run: bool) -> dict:
     import json
     cible = taille_octets(size)
@@ -437,6 +450,8 @@ def _volume_resize_sync(pod: str, ns: str, size: str, pvc: str, dry_run: bool) -
                                      "jsonpath={.status.capacity.storage} {.status.conditions[*].type}",
                                      namespace=ns, timeout=15)
             r["etat"] = out4.strip() if rc4 == 0 else ""
+            if rc3 == 0:
+                r["helm"] = _sync_helm_size(pod, ns, size)
         resultats.append(r)
     return {"pod": pod, "namespace": ns, "volumes": resultats,
             "note": ("FileSystemResizePending : le systeme de fichiers s'agrandit au prochain "

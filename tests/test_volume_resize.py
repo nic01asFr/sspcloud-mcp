@@ -52,3 +52,30 @@ def test_pas_de_reduction(monkeypatch):
     r = tools._volume_resize_sync("pod-0", "ns", "500Gi", "", False)
     assert r["volumes"][0]["statut"].startswith("inchange")
     assert not any(a[0] == "patch" for a in appels)
+
+
+def test_agrandissement_aligne_la_valeur_helm(monkeypatch):
+    appels = []
+    monkeypatch.setattr(tools.T, "kubectl", _faux_kubectl(appels))
+    vus = []
+    monkeypatch.setattr(tools.O, "helm_upgrade_values",
+                        lambda rel, ns, sets: vus.append((rel, ns, sets)) or (True, ""))
+    r = tools._volume_resize_sync("proj-x-jupyter-python-0", "ns", "500Gi", "", False)
+    assert vus == [("proj-x", "ns", {"persistence.size": "500Gi"})]
+    assert r["volumes"][0]["helm"] == "persistence.size aligné"
+
+
+def test_echec_helm_est_signale_sans_masquer_l_agrandissement(monkeypatch):
+    monkeypatch.setattr(tools.T, "kubectl", _faux_kubectl([]))
+    monkeypatch.setattr(tools.O, "helm_upgrade_values",
+                        lambda *a: (False, "boom"))
+    r = tools._volume_resize_sync("proj-x-jupyter-python-0", "ns", "500Gi", "", False)
+    assert r["volumes"][0]["statut"] == "agrandissement demande"
+    assert r["volumes"][0]["helm"].startswith("non synchronisé")
+
+
+def test_dry_run_ne_touche_pas_helm(monkeypatch):
+    monkeypatch.setattr(tools.T, "kubectl", _faux_kubectl([]))
+    monkeypatch.setattr(tools.O, "helm_upgrade_values",
+                        lambda *a: pytest.fail("helm touché en dry_run"))
+    tools._volume_resize_sync("proj-x-jupyter-python-0", "ns", "500Gi", "", True)

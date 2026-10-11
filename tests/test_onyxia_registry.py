@@ -230,3 +230,41 @@ def test_sync_suspension_targets_only_stale_zero_replica_releases(monkeypatch):
     monkeypatch.setattr(O, "_helm_suspended", lambda r, ns: r == "b")
     assert O.sync_suspension("ns", dry_run=True) == {
         "dry_run": True, "a_synchroniser": ["a"]}
+
+
+def test_sync_suspension_repairs_resized_volume(monkeypatch):
+    monkeypatch.setattr(O, "_helm_releases", lambda ns: [
+        {"name": "g", "chart": "jupyter-pytorch-gpu-2.5.6", "status": "deployed"}])
+    monkeypatch.setattr(O, "_statefulset_replicas", lambda ns: {"g-jupyter-pytorch-gpu": 0})
+    monkeypatch.setattr(O, "_helm_suspended", lambda r, ns: False)
+    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "100Gi")
+    appels = []
+
+    def fake(release, ns, sets):
+        appels.append(dict(sets))
+        if "persistence.size" not in sets:
+            return False, 'spec.resources.requests.storage: Forbidden: field can not be less than status.capacity'
+        return True, ""
+
+    monkeypatch.setattr(O, "helm_upgrade_values", fake)
+    r = O.sync_suspension("ns")
+    assert r["synchronisees"] == ["g"] and r["echecs"] == []
+    assert appels[-1] == {"global.suspend": "true", "persistence.size": "100Gi"}
+
+
+def test_gpu_suspend_realigns_volume_then_retries(monkeypatch):
+    from sspcloud_mcp import gpu_broker as G
+    seen = []
+
+    def fake(release, ns, sets):
+        seen.append((release, dict(sets)))
+        if "persistence.size" not in sets:
+            return False, "field can not be less than status.capacity"
+        return True, ""
+
+    monkeypatch.setattr(O, "helm_upgrade_values", fake)
+    monkeypatch.setattr(O, "pvc_capacity", lambda r, ns: "200Gi")
+    monkeypatch.setattr(G, "_replicas", lambda sts, ns: 0)
+    assert G._helm_suspend("proj-x-jupyter-pytorch-gpu", "ns", True) is True
+    assert seen[0][0] == "proj-x"                      # release historique (sans -gpu)
+    assert seen[-1][1] == {"global.suspend": "true", "persistence.size": "200Gi"}

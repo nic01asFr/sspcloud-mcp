@@ -163,34 +163,20 @@ def _helm_suspend(statefulset: str, namespace: str, suspended: bool) -> bool:
 
     Même geste que le bouton Suspendre/Reprendre d'Onyxia : l'état Helm reste
     cohérent avec le cluster (un « Reprendre » ultérieur ne contredit pas le
-    broker). Version du chart conservée : aucune dérive de valeurs.
+    broker). Version du chart conservée : aucune dérive de valeurs. Si le volume
+    a été agrandi hors Helm, `persistence.size` est aligné sur la capacité réelle.
     """
-    import json
     if project_of(statefulset) is None:
         return False
     release = release_of_statefulset(statefulset)
-    try:
-        from ._helm import find_helm, ensure_helm_repo, helm_env
-        helm = find_helm()
-        env = helm_env()
-        ls = subprocess.run([helm, "list", "-n", namespace, "-f", f"^{release}$",
-                             "-o", "json"], capture_output=True, text=True,
-                            timeout=30, env=env)
-        chart = (json.loads(ls.stdout or "[]") or [{}])[0].get("chart", "")
-        prefix = f"{GPU_CHART}-"
-        if ls.returncode != 0 or not chart.startswith(prefix):
-            return False
-        ensure_helm_repo(
-            helm, "https://inseefrlab.github.io/helm-charts-interactive-services")
-        up = subprocess.run(
-            [helm, "upgrade", release, f"inseefrlab/{GPU_CHART}", "-n", namespace,
-             "--version", chart[len(prefix):], "--reuse-values",
-             "--set", f"global.suspend={'true' if suspended else 'false'}"],
-            capture_output=True, text=True, timeout=90, env=env)
-        return up.returncode == 0 and _replicas(statefulset, namespace) == (
-            0 if suspended else 1)
-    except Exception:
-        return False
+    sets = {"global.suspend": "true" if suspended else "false"}
+    ok, err = O.helm_upgrade_values(release, namespace, sets)
+    if not ok and "status.capacity" in err:
+        cap = O.pvc_capacity(release, namespace)
+        if cap:
+            ok, err = O.helm_upgrade_values(
+                release, namespace, {**sets, "persistence.size": cap})
+    return ok and _replicas(statefulset, namespace) == (0 if suspended else 1)
 
 
 def _suspend(statefulset: str, namespace: str, suspended: bool) -> str:
