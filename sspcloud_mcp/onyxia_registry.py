@@ -9,8 +9,13 @@ invisible bien que `helm list` la voie. Le service le crée donc après chaque
 `helm install` (même convention que charts/sspcloud-mcp/scripts/install.sh) et
 le supprime au `helm uninstall`.
 
-Le Secret sert aussi de marqueur de propriété : `catalog` vaut CATALOG pour les
-releases lancées par le service, qui seules peuvent être désinstallées par lui.
+`catalog` doit être un vrai catalogue Onyxia : c'est par lui qu'Onyxia retrouve le
+chart pour Suspendre/Reprendre/Mettre à jour (un catalogue inconnu donne une erreur
+500 sur `/api/my-lab/app/resume`). Les charts interactifs InseeFrLab sont dans `ide`.
+
+La propriété est portée par l'annotation `sspcloud-mcp/origin` : `launched` pour
+les releases lancées par le service, qui seules peuvent être désinstallées par lui ;
+`adopted` pour les releases préexistantes rendues visibles.
 """
 
 from __future__ import annotations
@@ -21,10 +26,12 @@ import re
 
 from . import transports as T
 
-CATALOG = "sspcloud-mcp"
-# Releases préexistantes rendues visibles : affichées dans Onyxia, mais jamais
-# désinstallables par le service (is_managed ne reconnaît que CATALOG).
-CATALOG_ADOPTED = "sspcloud-mcp-adopted"
+CATALOG = "ide"                      # catalogue Onyxia des charts interactifs
+# Ancien catalogue inventé des pods adoptés (cassait Suspendre/Reprendre) : à réparer.
+_LEGACY_ADOPTED_CATALOG = "sspcloud-mcp-adopted"
+ORIGIN_ANNOTATION = "sspcloud-mcp/origin"
+ORIGIN_LAUNCHED = "launched"
+ORIGIN_ADOPTED = "adopted"
 # Charts interactifs InseeFrLab affichables comme un service Onyxia.
 INTERACTIVE_CHARTS = ("jupyter-python", "jupyter-pytorch-gpu", "vscode-python")
 _PREFIX = "sh.onyxia.release.v1."
@@ -51,7 +58,7 @@ def release_of_pod(pod: str) -> str | None:
 
 
 def register(release: str, namespace: str, friendly_name: str = "",
-             catalog: str = "") -> bool:
+             catalog: str = "", origin: str = ORIGIN_LAUNCHED) -> bool:
     """Crée (ou met à jour) le Secret Onyxia. Non bloquant : False si refusé."""
     rc, yml, _ = T.kubectl(
         "create", "secret", "generic", secret_name(release),
@@ -65,18 +72,25 @@ def register(release: str, namespace: str, friendly_name: str = "",
         return False
     rc, _, _ = T.kubectl("apply", "-f", "-", namespace=namespace,
                          timeout=20, input_text=yml)
-    return rc == 0
+    if rc != 0:
+        return False
+    T.kubectl("annotate", "secret", secret_name(release),
+              f"{ORIGIN_ANNOTATION}={origin}", "--overwrite",
+              namespace=namespace, timeout=15)
+    return True
 
 
 def is_managed(release: str, namespace: str) -> bool:
-    """True si la release a été lancée par le service (marqueur catalog)."""
+    """True si la release a été lancée par le service (annotation d'origine)."""
     rc, out, _ = T.kubectl(
-        "get", "secret", secret_name(release), "-o",
-        "jsonpath={.data.catalog}", namespace=namespace, timeout=15)
+        "get", "secret", secret_name(release), "-o", "json",
+        namespace=namespace, timeout=15)
     if rc != 0 or not out.strip():
         return False
     try:
-        return base64.b64decode(out.strip()).decode() == CATALOG
+        import json
+        ann = json.loads(out)["metadata"].get("annotations") or {}
+        return ann.get(ORIGIN_ANNOTATION) == ORIGIN_LAUNCHED
     except Exception:
         return False
 
@@ -139,11 +153,25 @@ def _helm_releases(namespace: str) -> list[dict]:
 
 
 def _registered(namespace: str) -> set[str]:
-    rc, out, _ = T.kubectl("get", "secrets", "-o", "name", namespace=namespace,
-                           timeout=25)
-    names = out.split() if rc == 0 else []
-    return {n.split("/", 1)[-1][len(_PREFIX):] for n in names
-            if n.split("/", 1)[-1].startswith(_PREFIX)}
+    """Releases déjà visibles ET correctes. Un Secret à l'ancien catalogue inventé
+    n'est pas compté : il est refait par adopt()."""
+    import json
+    rc, out, _ = T.kubectl("get", "secrets", "-o", "json", namespace=namespace,
+                           timeout=30)
+    if rc != 0 or not out.strip():
+        return set()
+    done: set[str] = set()
+    for it in json.loads(out).get("items", []):
+        name = it["metadata"]["name"]
+        if not name.startswith(_PREFIX):
+            continue
+        try:
+            cat = base64.b64decode((it.get("data") or {}).get("catalog", "")).decode()
+        except Exception:
+            cat = ""
+        if cat != _LEGACY_ADOPTED_CATALOG:
+            done.add(name[len(_PREFIX):])
+    return done
 
 
 def candidates(namespace: str) -> list[dict]:
@@ -227,7 +255,7 @@ def sync_suspension(namespace: str, releases: list[str] | None = None,
 def adopt(namespace: str, releases: list[str] | None = None,
           dry_run: bool = False) -> dict:
     """Rend visibles dans Onyxia des releases existantes (Secret catalogue
-    `sspcloud-mcp-adopted`). Sans `releases` : toutes les candidates."""
+    `ide`, annotation d'origine `adopted`). Sans `releases` : toutes les candidates."""
     cands = candidates(namespace)
     wanted = set(releases) if releases else None
     todo = [c for c in cands if wanted is None or c["release"] in wanted]
@@ -237,7 +265,8 @@ def adopt(namespace: str, releases: list[str] | None = None,
                 "ignorees": missing}
     done, failed = [], []
     for c in todo:
-        ok = register(c["release"], namespace, c["release"], catalog=CATALOG_ADOPTED)
+        ok = register(c["release"], namespace, c["release"], catalog=CATALOG,
+                      origin=ORIGIN_ADOPTED)
         (done if ok else failed).append(c["release"])
     return {"enregistrees": done, "echecs": failed, "ignorees": missing}
 

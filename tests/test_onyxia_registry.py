@@ -46,13 +46,17 @@ def test_register_creates_onyxia_secret(monkeypatch):
 
 
 def test_is_managed_only_for_service_releases(monkeypatch):
-    def fake(catalog):
-        enc = base64.b64encode(catalog.encode()).decode()
-        return lambda *a, **k: (0, enc, "")
+    import json
 
-    monkeypatch.setattr(T, "kubectl", fake(O.CATALOG))
+    def secret(origin):
+        ann = {O.ORIGIN_ANNOTATION: origin} if origin else {}
+        return lambda *a, **k: (0, json.dumps({"metadata": {"annotations": ann}}), "")
+
+    monkeypatch.setattr(T, "kubectl", secret(O.ORIGIN_LAUNCHED))
     assert O.is_managed("proj-x", "ns") is True
-    monkeypatch.setattr(T, "kubectl", fake("catalogue-onyxia"))
+    monkeypatch.setattr(T, "kubectl", secret(O.ORIGIN_ADOPTED))
+    assert O.is_managed("proj-x", "ns") is False
+    monkeypatch.setattr(T, "kubectl", secret(None))      # créé par Onyxia
     assert O.is_managed("proj-x", "ns") is False
     monkeypatch.setattr(T, "kubectl", lambda *a, **k: (1, "", "not found"))
     assert O.is_managed("proj-x", "ns") is False
@@ -189,7 +193,7 @@ def test_adopt_lists_only_unregistered_interactive_deployed(monkeypatch):
         "dry_run": True, "a_enregistrer": ["proj-a"], "ignorees": ["inconnue"]}
 
 
-def test_adopted_releases_are_not_service_managed(monkeypatch):
+def test_adopted_releases_use_real_catalog_and_adopted_origin(monkeypatch):
     seen = []
     monkeypatch.setattr(T, "kubectl", lambda *a, **k: (seen.append(a) or (0, "kind: S\n", "")))
     monkeypatch.setattr(O, "_helm_releases", lambda ns: [
@@ -198,8 +202,20 @@ def test_adopted_releases_are_not_service_managed(monkeypatch):
     r = O.adopt("ns")
     assert r["enregistrees"] == ["proj-a"]
     create = [a for a in seen if a[0] == "create"][0]
-    assert f"--from-literal=catalog={O.CATALOG_ADOPTED}" in create
-    assert O.CATALOG_ADOPTED != O.CATALOG
+    assert "--from-literal=catalog=ide" in create       # sinon Reprendre = 500
+    assert any(a[0] == "annotate" and f"{O.ORIGIN_ANNOTATION}={O.ORIGIN_ADOPTED}" in a
+               for a in seen)
+
+
+def test_legacy_catalog_secrets_are_repaired(monkeypatch):
+    import base64, json
+    def item(name, catalog):
+        return {"metadata": {"name": f"sh.onyxia.release.v1.{name}"},
+                "data": {"catalog": base64.b64encode(catalog.encode()).decode()}}
+    out = json.dumps({"items": [item("ok", "ide"), item("casse", "sspcloud-mcp-adopted"),
+                                item("mcp", "sspcloud-mcp")]})
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: (0, out, ""))
+    assert O._registered("ns") == {"ok", "mcp"}      # 'casse' sera refait
 
 
 def test_sync_suspension_targets_only_stale_zero_replica_releases(monkeypatch):
