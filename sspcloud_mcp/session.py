@@ -73,6 +73,7 @@ _DEFAULT_WORKDIR = "/home/onyxia/work"
 # Marge laissée sous ces 60 s : interruption du kernel + latence du proxy.
 SYNC_BUDGET_S = float(os.environ.get("MCP_SYNC_BUDGET_S", "40"))
 _INTERRUPT_BUDGET_S = 5
+_FIRST_TRY_S = 8       # 1re tentative de connexion au kernel, avant de résoudre l'IP
 
 
 # ── Modèle de session ─────────────────────────────────────────────────────────
@@ -290,14 +291,16 @@ class SessionManager:
             return s._kernel
         kc = KernelClient(s.base_url, token=s.token)
         try:
-            await kc.start()
+            # Première tentative COURTE : start() réessaie 60 s quand la connexion
+            # est refusée, bien au-delà du budget d'un appel (SYNC_BUDGET_S). Avec
+            # une IP périmée (pod recréé, session relue du registre), le délai
+            # tombait toujours avant la résolution ci-dessous : la session restait
+            # bloquée en KERNEL_START_TIMEOUT.
+            await kc.start(warmup=_FIRST_TRY_S)
         except Exception:
-            # Session relue du registre après un redéploiement : l'IP du pod a pu
-            # changer (pod recréé). Résoudre à nouveau et réessayer une fois.
-            if not await self._reresolve(s):
-                raise
+            await self._reresolve(s)       # recalcule IP/port si le pod a changé
             kc = KernelClient(s.base_url, token=s.token)
-            await kc.start()
+            await kc.start()               # pod en démarrage : attente normale
         s._kernel = kc
         # Le kernel démarre dans la racine de Jupyter : l'aligner sur le workdir
         # de la session (comme exec bash et list_files), créé s'il manque.

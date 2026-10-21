@@ -318,3 +318,43 @@ def test_upgrade_never_changes_pod_state_by_accident(monkeypatch):
     cmds = _fake_helm(monkeypatch, {"r-jupyter-pytorch-gpu": 1})
     O.helm_upgrade_values("r", "ns", {"global.suspend": "true"})
     assert "global.suspend=true" in cmds[0]
+
+
+def test_stale_session_ip_is_reresolved_within_the_call_budget(monkeypatch, tmp_path):
+    """Session relue du registre avec l'IP d'un ancien pod : le kernel doit être
+    rejoint sur la nouvelle IP, sans attendre les 60 s de start() (> budget 40 s)."""
+    import asyncio
+    from sspcloud_mcp import session as S
+
+    monkeypatch.setattr(S, "_REGISTRY", tmp_path / "absent" / "r.json")
+    monkeypatch.setattr(T, "in_cluster", lambda: False)
+    tentatives = []
+
+    class FauxKernel:
+        def __init__(self, base_url, token=""):
+            self.base_url, self.alive = base_url, True
+
+        async def start(self, kernel_name="python3", warmup=60):
+            tentatives.append((self.base_url, warmup))
+            if "ancienne" in self.base_url:
+                raise ConnectionError("refusée")
+            return "kid"
+
+        async def execute(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(S, "KernelClient", FauxKernel)
+    mgr = S.SessionManager()
+    s = S.DevSession(id="x", namespace="ns", pod="p-0", base_url="http://ancienne:8888",
+                     token="t", workdir="/home/onyxia/work")
+
+    async def reresolve(sess):
+        sess.base_url = "http://nouvelle:8888"
+        return True
+
+    monkeypatch.setattr(mgr, "_reresolve", reresolve)
+    kc = asyncio.run(mgr.ensure_kernel(s))
+    assert kc.base_url == "http://nouvelle:8888"
+    assert tentatives[0] == ("http://ancienne:8888", S._FIRST_TRY_S)   # tentative courte
+    assert tentatives[0][1] < S.SYNC_BUDGET_S                          # sous le budget d'un appel
+    assert tentatives[1][0] == "http://nouvelle:8888"
