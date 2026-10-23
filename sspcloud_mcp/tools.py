@@ -17,6 +17,7 @@ from . import transports as T
 from . import deploy_ops as D
 from . import gpu_broker as G
 from . import onyxia_registry as O
+from . import ops
 from .errors import MCPToolError
 from .session import SYNC_BUDGET_S
 
@@ -244,6 +245,31 @@ async def pod_info(mgr, args: dict) -> dict:
         return info
 
     return await loop.run_in_executor(None, _collect)
+
+
+async def _en_fil(fonction, *a, **k) -> dict:
+    """kubectl est bloquant : hors de la boucle d'événements."""
+    return await asyncio.get_event_loop().run_in_executor(None, lambda: fonction(*a, **k))
+
+
+async def workload_status(_mgr, args: dict) -> dict:
+    """État d'un Deployment, StatefulSet ou pod : réplicas, images, pods, causes d'attente."""
+    return await _en_fil(ops.statut, args.get("target", ""), _ns(args))
+
+
+async def workload_logs(_mgr, args: dict) -> dict:
+    """Journaux d'un pod (ou des pods d'un workload), secrets masqués, sortie bornée."""
+    return await _en_fil(
+        ops.journaux, args.get("target", ""), _ns(args),
+        lignes=args.get("tail", 100), depuis=args.get("since", ""),
+        precedent=bool(args.get("previous", False)),
+        conteneur=args.get("container", ""))
+
+
+async def workload_events(_mgr, args: dict) -> dict:
+    """Événements Kubernetes d'une cible, ou alertes (Warning) du namespace sans cible."""
+    return await _en_fil(ops.evenements, args.get("target", ""), _ns(args),
+                         limite=args.get("limit", 30))
 
 
 async def pod_register(mgr, args: dict) -> dict:
@@ -560,6 +586,25 @@ TOOLS: dict = {
         "affiche « Démarrage du conteneur »).",
         _s({"release": _STR, "all": _BOOL, "dry_run": _BOOL, "sync_suspend": _BOOL,
             "namespace": _STR}, [])),
+
+    "workload_status": (workload_status,
+        "État d'un Deployment, StatefulSet ou pod du namespace (lecture seule) : réplicas, "
+        "images, pods avec phase, redémarrages, état des conteneurs et cause d'attente "
+        "(GPU, volume, image). target = 'mcp', 'statefulset/atelier' ou 'pod/atelier-0'.",
+        _s({"target": _STR, "namespace": _STR}, ["target"])),
+
+    "workload_logs": (workload_logs,
+        "Journaux d'un pod ou des pods d'un workload (lecture seule, jetons et mots de "
+        "passe masqués, 500 lignes et 20 Ko au plus). Sert à comprendre un pod qui ne "
+        "répond pas ou une erreur du service. previous=true : conteneur précédent.",
+        _s({"target": _STR, "tail": _INT, "since": _STR, "previous": _BOOL,
+            "container": _STR, "namespace": _STR}, ["target"])),
+
+    "workload_events": (workload_events,
+        "Événements Kubernetes d'une cible (lecture seule) : pourquoi un pod est en attente, "
+        "une image ne se tire pas, un volume ne se monte pas. Sans target : les alertes "
+        "(Warning) du namespace.",
+        _s({"target": _STR, "limit": _INT, "namespace": _STR}, [])),
 
     "pod_info": (pod_info,
         "Accès et service d'un pod lancé par Helm : résume son NOTES.txt (URL "

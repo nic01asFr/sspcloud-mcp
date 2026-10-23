@@ -57,6 +57,16 @@ async def _dispatch(mgr: SessionManager, method: str, params: dict):
             raise MCPToolError("UNKNOWN_TOOL", f"Outil inconnu : {name}",
                                "Utilisez tools/list pour la liste.")
         handler = entry[0]
+        # Arguments obligatoires : un champ manquant ou mal nommé (ex. `command` au lieu de
+        # `code`) donne une erreur claire plutôt qu'un KeyError opaque (INTERNAL).
+        manquants = [r for r in (entry[2].get("required") or []) if r not in args]
+        if manquants:
+            raise MCPToolError(
+                "MISSING_ARGUMENT",
+                f"{name} : argument(s) manquant(s) : {', '.join(manquants)}.",
+                f"Reçus : {', '.join(sorted(args)) or 'aucun'}. "
+                f"Attendus : {', '.join(entry[2].get('required') or [])}. "
+                f"Facultatifs : {', '.join(sorted(set(entry[2].get('properties', {})) - set(entry[2].get('required') or [])))}.")
         result = await handler(mgr, args)
         return {"content": [{"type": "text",
                              "text": json.dumps(result, ensure_ascii=False)}],

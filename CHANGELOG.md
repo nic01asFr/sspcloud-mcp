@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 (non publié)
+
+- **Exploitation** (30 outils) : `workload_status`, `workload_logs`, `workload_events`,
+  en lecture seule, bornés aux Deployment/StatefulSet/pod du namespace, secrets masqués.
+  Le service n'a plus besoin d'un pod annexe avec `kubectl` pour diagnostiquer.
+- **Arguments obligatoires** : un champ manquant ou mal nommé (ex. `command` au lieu de
+  `code`) renvoie `MISSING_ARGUMENT` (champs reçus et attendus) au lieu de `INTERNAL`
+  « KeyError ».
+- **Fix** : réponse sans corps (202 d'une notification) avec `Content-Length: 0` en
+  HTTP/1.1 keep-alive (les clients MCP attendaient le délai).
+- **Fix** : IP périmée d'une session restaurée résolue dans le budget d'un appel
+  (première tentative courte de 8 s) ; avant, `KERNEL_START_TIMEOUT` permanent.
+
 ## 0.5.0
 
 - **Fix pods neufs** : le WebSocket kernel négocie le sous-protocole
