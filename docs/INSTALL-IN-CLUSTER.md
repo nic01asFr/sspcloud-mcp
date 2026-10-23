@@ -85,7 +85,7 @@ La page OAuth ne la délivre pas — elle la **vérifie**.
 
 Puis, dans **Claude Desktop / mobile / claude.ai** → *Paramètres → Connecteurs → Ajouter un
 connecteur MCP* → coller l'**URL**. Claude ouvre le formulaire d'autorisation ci-dessous :
-collez-y la **clé API**. Les **30 outils** apparaissent.
+collez-y la **clé API**. Les **31 outils** apparaissent.
 
 ![Formulaire d'autorisation OAuth « Autoriser Claude »](img/04-oauth-authorize.png)
 

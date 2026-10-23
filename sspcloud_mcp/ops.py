@@ -12,6 +12,7 @@ l'agent ce qui se passe, de façon BORNÉE : pas de shell, pas de kubectl libre.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 
@@ -213,3 +214,46 @@ def evenements(cible: str, ns: str, limite: int = 30) -> dict:
                    "nombre": e.get("count", 1)})
     ev.sort(key=lambda x: x["quand"] or "")
     return {"cible": cible or "(alertes du namespace)", "evenements": ev[-limite:]}
+
+
+def redemarrer(cible: str, ns: str, confirmer: bool = False) -> dict:
+    """Redémarre un Deployment ou un StatefulSet (rollout restart), ou un pod à contrôleur.
+
+    Sans confirmer=True : aperçu seulement, rien n'est exécuté. Un pod sans contrôleur
+    n'est jamais supprimé (il ne serait pas recréé). Les cibles listées dans
+    OPS_PROTEGES (variable d'environnement du service) sont refusées.
+    """
+    kind, name = resoudre(cible, ns)
+    obj = _json(kind, name, ns)
+    protegees = {x.strip() for x in os.getenv("OPS_PROTEGES", "").split(",") if x.strip()}
+    if name in protegees or f"{kind}/{name}" in protegees:
+        raise MCPToolError("TARGET_PROTECTED", f"{kind}/{name} est protégé.",
+                           "Retirez-le de OPS_PROTEGES (configuration du service).")
+    if kind == "pod":
+        proprietaires = obj["metadata"].get("ownerReferences") or []
+        if not proprietaires:
+            raise MCPToolError(
+                "BARE_POD", f"pod/{name} n'a pas de contrôleur : le supprimer le détruirait.",
+                "Seuls les pods d'un StatefulSet, Deployment ou ReplicaSet se redémarrent.")
+        action = (f"supprime pod/{name}, recréé par "
+                  f"{proprietaires[0].get('kind')}/{proprietaires[0].get('name')}")
+        concernes = [name]
+    else:
+        if kind == "statefulset" and not obj.get("spec", {}).get("replicas"):
+            raise MCPToolError("NOTHING_TO_RESTART", f"{kind}/{name} est à 0 réplica (suspendu).",
+                               "Reprenez-le d'abord (Onyxia, pod_register, gpu_switch).")
+        action = f"rollout restart {kind}/{name}"
+        concernes = [p["metadata"]["name"] for p in _pods_de(kind, obj, ns)]
+    apercu = {"cible": f"{kind}/{name}", "action": action, "pods_concernes": concernes,
+              "interruption": "brève : indisponible le temps du redémarrage"}
+    if not confirmer:
+        return {**apercu, "fait": False,
+                "suite": "Rappelez workload_restart avec confirm=true pour l'exécuter."}
+    if kind == "pod":
+        rc, out, err = _kubectl("delete", "pod", name, "--wait=false", ns=ns, timeout=30)
+    else:
+        rc, out, err = _kubectl("rollout", "restart", f"{kind}/{name}", ns=ns, timeout=30)
+    if rc != 0:
+        raise MCPToolError("RESTART_FAILED", f"{action} : {err.strip()[:200]}")
+    return {**apercu, "fait": True, "retour": out.strip()[:200],
+            "suite": "workload_status pour suivre le retour à l'état prêt."}

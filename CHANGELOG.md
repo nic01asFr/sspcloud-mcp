@@ -2,9 +2,10 @@
 
 ## 0.6.0 (non publié)
 
-- **Exploitation** (30 outils) : `workload_status`, `workload_logs`, `workload_events`,
-  en lecture seule, bornés aux Deployment/StatefulSet/pod du namespace, secrets masqués.
-  Le service n'a plus besoin d'un pod annexe avec `kubectl` pour diagnostiquer.
+- **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture
+  seule, secrets masqués) et `workload_restart` (aperçu puis `confirm=true`), bornés aux
+  Deployment/StatefulSet/pod du namespace. Le service n'a plus besoin d'un pod annexe avec
+  `kubectl` pour diagnostiquer, ni pour se redéployer (`workload_restart target='mcp'`).
 - **Arguments obligatoires** : un champ manquant ou mal nommé (ex. `command` au lieu de
   `code`) renvoie `MISSING_ARGUMENT` (champs reçus et attendus) au lieu de `INTERNAL`
   « KeyError ».

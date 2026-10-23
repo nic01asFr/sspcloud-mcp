@@ -12,7 +12,7 @@ def test_version():
 
 
 def test_tools_registry():
-    assert len(TOOLS) == 30
+    assert len(TOOLS) == 31
     for name, (handler, desc, schema) in TOOLS.items():
         assert callable(handler), name
         assert isinstance(desc, str) and desc, name

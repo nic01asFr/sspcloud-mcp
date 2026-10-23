@@ -124,3 +124,81 @@ def test_argument_manquant_donne_une_erreur_claire_pas_un_keyerror():
     assert erreur["code"] == "MISSING_ARGUMENT"
     assert "code" in erreur["message"]
     assert "command" in erreur["hint"] and "session_id" in erreur["hint"]
+
+
+# ── Redémarrage ───────────────────────────────────────────────────────────────
+
+def _cluster_redemarrage(monkeypatch, replicas=1, proprietaires=True):
+    appels = []
+
+    def k(*args, namespace=None, timeout=30, input_text=None):
+        appels.append(args)
+        if args[0] == "get" and "-o" in args and args[args.index("-o") + 1] == "name":
+            return (0, "ok", "") if (args[1], args[2]) in {("statefulset", "atelier"),
+                                                          ("deployment", "mcp"),
+                                                          ("pod", "atelier-0"),
+                                                          ("pod", "nu-0")} else (1, "", "NotFound")
+        if args[:3] in (("get", "statefulset", "atelier"), ("get", "deployment", "mcp")):
+            return 0, json.dumps({"spec": {"replicas": replicas, "selector": {"matchLabels": {"app": "x"}},
+                                           "template": {"spec": {"containers": [{"image": "i"}]}}},
+                                  "status": {}}), ""
+        if args[:3] == ("get", "pod", "atelier-0"):
+            p = _pod("atelier-0")
+            if proprietaires:
+                p["metadata"]["ownerReferences"] = [{"kind": "StatefulSet", "name": "atelier"}]
+            return 0, json.dumps(p), ""
+        if args[:3] == ("get", "pod", "nu-0"):
+            return 0, json.dumps(_pod("nu-0")), ""
+        if args[:2] == ("get", "pods"):
+            return 0, json.dumps({"items": [_pod("atelier-0")]}), ""
+        if args[0] in ("rollout", "delete"):
+            return 0, "restarted", ""
+        return 1, "", "inattendu"
+
+    monkeypatch.setattr(T, "kubectl", k)
+    return appels
+
+
+def test_redemarrage_sans_confirmation_ne_fait_rien(monkeypatch):
+    appels = _cluster_redemarrage(monkeypatch)
+    r = ops.redemarrer("mcp", "ns")
+    assert r["fait"] is False and r["action"] == "rollout restart deployment/mcp"
+    assert not any(a[0] in ("rollout", "delete") for a in appels)      # aperçu seulement
+
+
+def test_redemarrage_confirme_statefulset(monkeypatch):
+    appels = _cluster_redemarrage(monkeypatch)
+    r = ops.redemarrer("statefulset/atelier", "ns", confirmer=True)
+    assert r["fait"] is True and r["pods_concernes"] == ["atelier-0"]
+    assert ("rollout", "restart", "statefulset/atelier") in appels
+
+
+def test_redemarrage_pod_a_controleur_supprime_le_pod(monkeypatch):
+    appels = _cluster_redemarrage(monkeypatch)
+    r = ops.redemarrer("pod/atelier-0", "ns", confirmer=True)
+    assert "recréé par StatefulSet/atelier" in r["action"]
+    assert any(a[:3] == ("delete", "pod", "atelier-0") for a in appels)
+
+
+def test_redemarrage_refuse_un_pod_nu(monkeypatch):
+    appels = _cluster_redemarrage(monkeypatch)
+    with pytest.raises(MCPToolError) as e:
+        ops.redemarrer("pod/nu-0", "ns", confirmer=True)
+    assert e.value.code == "BARE_POD"
+    assert not any(a[0] == "delete" for a in appels)
+
+
+def test_redemarrage_refuse_un_statefulset_suspendu(monkeypatch):
+    _cluster_redemarrage(monkeypatch, replicas=0)
+    with pytest.raises(MCPToolError) as e:
+        ops.redemarrer("atelier", "ns", confirmer=True)
+    assert e.value.code == "NOTHING_TO_RESTART"
+
+
+def test_redemarrage_respecte_les_cibles_protegees(monkeypatch):
+    appels = _cluster_redemarrage(monkeypatch)
+    monkeypatch.setenv("OPS_PROTEGES", "statefulset/atelier, autre")
+    with pytest.raises(MCPToolError) as e:
+        ops.redemarrer("atelier", "ns", confirmer=True)
+    assert e.value.code == "TARGET_PROTECTED"
+    assert not any(a[0] in ("rollout", "delete") for a in appels)

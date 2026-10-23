@@ -272,6 +272,12 @@ async def workload_events(_mgr, args: dict) -> dict:
                          limite=args.get("limit", 30))
 
 
+async def workload_restart(_mgr, args: dict) -> dict:
+    """Redémarre un Deployment/StatefulSet (ou un pod à contrôleur) : aperçu, puis confirm=true."""
+    return await _en_fil(ops.redemarrer, args.get("target", ""), _ns(args),
+                         confirmer=bool(args.get("confirm", False)))
+
+
 async def pod_register(mgr, args: dict) -> dict:
     """Rend visibles dans Onyxia « Mes services » des pods Helm existants."""
     ns = _ns(args)
@@ -605,6 +611,15 @@ TOOLS: dict = {
         "une image ne se tire pas, un volume ne se monte pas. Sans target : les alertes "
         "(Warning) du namespace.",
         _s({"target": _STR, "limit": _INT, "namespace": _STR}, [])),
+
+    "workload_restart": (workload_restart,
+        "Redémarre un Deployment ou un StatefulSet du namespace (rollout restart), ou un pod "
+        "qui a un contrôleur. Sans confirm=true : APERÇU seulement (action, pods concernés), "
+        "rien n'est exécuté ; rappeler avec confirm=true pour agir. Sert à déployer une "
+        "nouvelle image du service (target='mcp') ou à relancer un service bloqué "
+        "(target='statefulset/atelier'). Refuse un pod sans contrôleur et un StatefulSet à 0 "
+        "réplica. L'interruption est brève.",
+        _s({"target": _STR, "confirm": _BOOL, "namespace": _STR}, ["target"])),
 
     "pod_info": (pod_info,
         "Accès et service d'un pod lancé par Helm : résume son NOTES.txt (URL "

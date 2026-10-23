@@ -3,7 +3,7 @@
 ![MCP](https://img.shields.io/badge/MCP-server-3559FC)
 ![SSPCloud](https://img.shields.io/badge/SSPCloud-Onyxia-4775FF)
 ![OAuth](https://img.shields.io/badge/OAuth_2.1-DCR%20%2B%20PKCE-3559FC)
-![Outils](https://img.shields.io/badge/outils-30-4775FF)
+![Outils](https://img.shields.io/badge/outils-31-4775FF)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 
 **▶ [Présentation produit](https://nic01asfr.github.io/sspcloud-mcp/)** · [Installer](docs/INSTALL-IN-CLUSTER.md) · [Pour un agent IA](AGENTS.md) · [Changelog](CHANGELOG.md)
@@ -167,7 +167,7 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 
 ---
 
-## Référence des outils (30)
+## Référence des outils (31)
 
 **Sessions & exécution**
 | Outil | Rôle |
@@ -202,12 +202,13 @@ session_stop(session_id=...)                 # libère kernel + port-forward
 | `pod_register` | Rend visibles dans « Mes services » des pods déjà lancés ; `sync_suspend=true` aligne Helm sur les pods suspendus ou agrandis à la main. |
 | `volume_resize` | Agrandit le volume persistant d'un pod et aligne `persistence.size` de la release Helm. |
 
-**Exploitation du namespace** *(lecture seule, cibles bornées : Deployment, StatefulSet, pod)*
+**Exploitation du namespace** *(cibles bornées : Deployment, StatefulSet, pod)*
 | Outil | Rôle |
 |---|---|
 | `workload_status` | Réplicas, images, pods (phase, redémarrages, état des conteneurs, cause d'attente GPU/volume/image). |
 | `workload_logs` | Journaux d'un pod ou d'un workload ; jetons et mots de passe masqués ; 500 lignes et 20 Ko au plus. |
 | `workload_events` | Événements Kubernetes d'une cible, ou alertes (Warning) du namespace sans cible. |
+| `workload_restart` | Redémarre un Deployment/StatefulSet (ou un pod à contrôleur). Sans `confirm=true` : aperçu seulement. Refuse un pod nu et un StatefulSet suspendu ; `OPS_PROTEGES` liste les cibles interdites. Sert à déployer une nouvelle image du service (`target='mcp'`). |
 
 Les pods lancés par le service sont enregistrés dans Onyxia (« Mes services », catalogue `ide`) :
 Suspendre, Reprendre et Supprimer fonctionnent depuis l'interface, et le slot GPU reste cohérent.

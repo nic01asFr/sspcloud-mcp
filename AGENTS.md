@@ -62,7 +62,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/register \
   -d '{"client_name":"c","redirect_uris":["https://claude.ai/api/mcp/auth_callback"]}'  # attendu 201 (DCR)
 ```
 
-Et, avec le bearer, un `initialize` puis `tools/list` doivent renvoyer **30 outils**.
+Et, avec le bearer, un `initialize` puis `tools/list` doivent renvoyer **31 outils**.
 Si `OPTIONS` renvoie 501 → le pod tourne une image trop ancienne : `kubectl rollout
 restart deployment/mcp -n <ns>` (l'image GHCR est en `pullPolicy: Always`).
 
@@ -86,7 +86,7 @@ La clé bearer est conservée (`resource-policy: keep`), la config du client res
 
 ## 8. Références
 
-- `README.md` — vue d'ensemble + référence des 30 outils.
+- `README.md` — vue d'ensemble + référence des 31 outils.
 - `docs/INSTALL-IN-CLUSTER.md` — install illustrée.
 - `docs/GUIDE.md` — workflows (dev, GPU, notebooks, déploiement).
 - `CHANGELOG.md` — historique.
