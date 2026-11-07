@@ -2,6 +2,20 @@
 
 ## 0.6.0 (non publié)
 
+- **Securite OAuth** (reprise de `179e230`) : `/authorize` valide `redirect_uri` contre celles
+  declarees a l'enregistrement et exige un consentement explicite par couple (client,
+  redirection) ; PKCE S256 obligatoire et lie au client ; le code ne porte plus la cle maitre.
+  `/oauth/token` emet un jeton DERIVE (`pmcp_...`, stocke hache, 90 jours, revocable) ; la cle
+  maitre reste acceptee pour l'acces a l'API, mais elle seule peut consentir. Le serveur
+  refuse de demarrer ouvert sans `PASSERELLE_MCP_BEARER`. Les clients deja connectes avec
+  la cle maitre continuent de fonctionner ; changer la cle les deconnecte.
+- **Comparaisons** : plus de `TypeError` sur une cle, un cookie ou un champ non ASCII.
+- **Arguments d'agent** : `dest`, `branch`, `source` (push_repo), `path`/`depth` (list_files),
+  `project` (session_start, gpu_switch) et `workdir` sont valides (refus `INVALID_ARGUMENT`)
+  puis cites avant d'atteindre un shell. `expose_public` construit son manifeste en objets
+  (JSON) au lieu de YAML texte ; `pod`, `namespace`, `port` et `path` sont valides.
+- **Reste a faire** : CORS restreint aux origines attendues, plafond du flux SSE.
+
 - **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture
   seule, secrets masqués) et `workload_restart` (aperçu puis `confirm=true`), bornés aux
   Deployment/StatefulSet/pod du namespace. Le service n'a plus besoin d'un pod annexe avec
