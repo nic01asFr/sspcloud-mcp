@@ -13,6 +13,7 @@ import time
 import uuid
 
 from . import repo_sync
+from . import validation as V
 from . import transports as T
 from . import deploy_ops as D
 from . import gpu_broker as G
@@ -44,7 +45,7 @@ def _ns(args: dict) -> str:
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def session_start(mgr, args: dict) -> dict:
-    project = args.get("project", "")
+    project = V.nom_projet(args["project"]) if args.get("project") else ""
     sid = (args.get("session_id") or
            (f"proj-{project}" if project else f"dev-{uuid.uuid4().hex[:8]}"))
     attach = args.get("attach_pod") or ""
@@ -150,11 +151,14 @@ async def read_file(mgr, args: dict) -> dict:
 async def list_files(mgr, args: dict) -> dict:
     sid = args["session_id"]
     path = args.get("path", "")
-    depth = int(args.get("depth", 2))
+    try:
+        depth = max(1, min(int(args.get("depth", 2)), 10))
+    except (TypeError, ValueError):
+        raise V.argument_invalide("depth", args.get("depth"), "un entier de 1 a 10.")
     s = mgr.get(sid)
     root = path or s.repo_path or s.workdir
     r = await mgr.exec_bash(
-        sid, f"cd {root} 2>/dev/null && find . -maxdepth {depth} "
+        sid, f"cd {V.chemin_pour_cd(root)} 2>/dev/null && find . -maxdepth {depth} "
              f"-not -path '*/.git/*' | head -300", timeout=60)
     return {"root": root, "tree": r["stdout"]}
 
@@ -191,6 +195,7 @@ async def gpu_switch(mgr, args: dict) -> dict:
     if not project:
         raise MCPToolError("PROJECT_REQUIRED", "project requis.",
                            "Ex: gpu_switch(project='claris-open').")
+    project = V.nom_projet(project)
     ns = _ns(args)
     preempt = bool(args.get("preempt", True))
     info = await asyncio.get_event_loop().run_in_executor(
@@ -400,7 +405,11 @@ async def expose_public(mgr, args: dict) -> dict:
     if not pod:
         raise MCPToolError("POD_REQUIRED", "session_id (ou pod) requis.",
                            "expose_public(session_id=...) après session_start.")
-    return await D.expose_pod(pod, ns, port=int(args.get("port", 8000)),
+    port = args.get("port", 8000)
+    if isinstance(port, str) and port.strip().isdigit():
+        port = int(port)               # "8080" est accepte ; True, 80.9, "abc" ne le sont pas
+    port = V.port(port)
+    return await D.expose_pod(pod, ns, port=port,
                               name=args.get("name", ""), path=args.get("path", "/"))
 
 

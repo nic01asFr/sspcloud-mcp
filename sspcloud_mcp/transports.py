@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import socket
 import subprocess
 import time
 from dataclasses import dataclass
 
+from . import validation as V
 from .errors import kubectl_forbidden, pod_unreachable
 
 # Contexte kubectl figé (env) — indispensable côté Claude Desktop où le contexte
@@ -94,7 +96,7 @@ def find_jupyter_pod(namespace: str, name_filter: str = "") -> str | None:
 def exec_shell(pod: str, namespace: str, script: str,
                timeout: int = 120, workdir: str = "") -> tuple[int, str, str]:
     """Exécute un script bash dans le pod via kubectl exec. Login shell."""
-    full = f"cd {workdir} && {script}" if workdir else script
+    full = f"cd {V.chemin_pour_cd(workdir)} && {script}" if workdir else script
     rc, out, err = kubectl(
         "exec", pod, "--", "bash", "-lc", full,
         namespace=namespace, timeout=timeout)
