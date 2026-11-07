@@ -405,10 +405,10 @@ async def expose_public(mgr, args: dict) -> dict:
     if not pod:
         raise MCPToolError("POD_REQUIRED", "session_id (ou pod) requis.",
                            "expose_public(session_id=...) après session_start.")
-    try:
-        port = int(args.get("port", 8000))
-    except (TypeError, ValueError):
-        raise V.argument_invalide("port", args.get("port"), "un entier de 1 a 65535.")
+    port = args.get("port", 8000)
+    if isinstance(port, str) and port.strip().isdigit():
+        port = int(port)               # "8080" est accepte ; True, 80.9, "abc" ne le sont pas
+    port = V.port(port)
     return await D.expose_pod(pod, ns, port=port,
                               name=args.get("name", ""), path=args.get("path", "/"))
 

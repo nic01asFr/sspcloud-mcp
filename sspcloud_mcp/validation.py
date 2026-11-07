@@ -17,7 +17,7 @@ import shlex
 from .errors import MCPToolError
 
 _NOM_PROJET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
-_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
+_SEGMENT = r"[A-Za-z0-9_.][A-Za-z0-9._-]{0,99}"
 _DESTINATION = re.compile(rf"^{_SEGMENT}(/{_SEGMENT}){{0,7}}$")
 _REFERENCE_GIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 _NOM_K8S = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")

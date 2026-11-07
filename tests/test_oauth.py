@@ -31,6 +31,8 @@ def etat_isole(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "_CLIENTS_FILE", tmp_path / "clients.json")
     monkeypatch.setattr(oauth, "_GRANTS_FILE", tmp_path / "grants.json")
     monkeypatch.setattr(oauth, "_TOKENS_FILE", tmp_path / "tokens.json")
+    monkeypatch.setattr(oauth, "_SESSIONS_FILE", tmp_path / "sessions.json")
+    monkeypatch.setattr(oauth, "_sessions", {})
     monkeypatch.setattr(oauth, "_clients", {})
     monkeypatch.setattr(oauth, "_grants", {})
     monkeypatch.setattr(oauth, "_tokens", {})
@@ -69,6 +71,27 @@ def _consent(client_id: str, challenge: str, redirection: str = _REDIRECTION) ->
         {"api_key": "SECRET123"}, _qs(client_id, challenge, redirection))
     assert code == 302, hdrs
     return _code_depuis(hdrs)
+
+
+def _consent_reponse(client_id: str, challenge: str, redirection: str = _REDIRECTION):
+    return oauth.authorize_confirm(
+        {"api_key": "SECRET123"}, _qs(client_id, challenge, redirection))
+
+
+def _session_depuis(hdrs: dict) -> str:
+    for ligne in hdrs["Set-Cookie"]:
+        if ligne.startswith("mcp_session="):
+            return ligne.split(";", 1)[0].split("=", 1)[1]
+    raise AssertionError("pas de cookie de session")
+
+
+def _echange(client_id: str, redirection: str, auth_code: str, verifier: str, omis=()):
+    champs = {"grant_type": "authorization_code", "code": auth_code,
+              "code_verifier": verifier, "client_id": client_id, "redirect_uri": redirection}
+    for k in omis:
+        champs.pop(k, None)
+    return oauth.oauth_token(urllib.parse.urlencode(champs).encode(),
+                             "application/x-www-form-urlencoded")
 
 
 # ── Métadonnées et clé maître ────────────────────────────────────────────────
@@ -141,7 +164,7 @@ def test_cookie_seul_n_emet_pas_de_code_pour_un_couple_inconnu():
     client_id = _client()
     _, challenge = _pkce()
     code, body, _ = oauth.authorize_get(
-        _qs(client_id, challenge), "mcp_api_key=SECRET123")
+        _qs(client_id, challenge), f"mcp_session={oauth.create_session()}")
     assert code == 200, "Un couple jamais consenti doit passer par un écran."
     assert b"Autoriser" in body
 
@@ -149,9 +172,9 @@ def test_cookie_seul_n_emet_pas_de_code_pour_un_couple_inconnu():
 def test_consentement_memorise_evite_de_redemander():
     client_id = _client()
     _, challenge = _pkce()
-    _consent(client_id, challenge)
+    sid = _session_depuis(_consent_reponse(client_id, challenge)[2])
     code, _, hdrs = oauth.authorize_get(
-        _qs(client_id, challenge), "mcp_api_key=SECRET123")
+        _qs(client_id, challenge), f"mcp_session={sid}")
     assert code == 302 and "code=" in hdrs["Location"]
 
 
@@ -192,7 +215,8 @@ def test_pkce_rejects_bad_verifier():
     auth_code = _consent(client_id, challenge)
     form = urllib.parse.urlencode({
         "grant_type": "authorization_code", "code": auth_code,
-        "code_verifier": "WRONG-verifier",
+        "code_verifier": "WRONG-verifier", "client_id": client_id,
+        "redirect_uri": _REDIRECTION,
     }).encode()
     status, resp, _ = oauth.oauth_token(form, "application/x-www-form-urlencoded")
     assert status == 400
@@ -238,7 +262,8 @@ def test_code_a_usage_unique():
     auth_code = _consent(client_id, challenge)
     form = urllib.parse.urlencode({
         "grant_type": "authorization_code", "code": auth_code,
-        "code_verifier": verifier,
+        "code_verifier": verifier, "client_id": client_id,
+        "redirect_uri": _REDIRECTION,
     }).encode()
     assert oauth.oauth_token(form, "application/x-www-form-urlencoded")[0] == 200
     assert oauth.oauth_token(form, "application/x-www-form-urlencoded")[0] == 400
@@ -303,3 +328,108 @@ def test_egal_refuse_les_non_chaines():
     assert oauth._egal(None, "x") is False
     assert oauth._egal("x", None) is False
     assert oauth._egal("é", "é") is True
+
+
+# -- Revue de la branche (wikichat) : cookie opaque, revocation, plafonds ------
+
+def test_le_cookie_ne_contient_jamais_la_cle_maitre():
+    client_id = _client()
+    _, challenge = _pkce()
+    code, _, hdrs = _consent_reponse(client_id, challenge)
+    assert code == 302
+    cookies = hdrs["Set-Cookie"]
+    assert all("SECRET123" not in c for c in cookies)
+    assert any(c.startswith("mcp_session=s_") for c in cookies)
+    assert any(c.startswith("mcp_api_key=;") and "Max-Age=0" in c for c in cookies), (
+        "L'ancien cookie (cle maitre en clair) doit etre efface du navigateur.")
+
+
+def test_ancien_cookie_cle_maitre_n_ouvre_plus_rien():
+    client_id = _client()
+    _, challenge = _pkce()
+    _consent(client_id, challenge)
+    code, body, _ = oauth.authorize_get(
+        _qs(client_id, challenge), "mcp_api_key=SECRET123")
+    assert code == 200 and b"Autoriser" in body, "L'ancien cookie ne vaut plus consentement."
+    code, _, _ = oauth.authorize_confirm(
+        {}, _qs(client_id, challenge), "mcp_api_key=SECRET123")
+    assert code == 401
+
+
+def test_session_inconnue_ou_expiree_est_refusee(monkeypatch):
+    assert not oauth.session_valide("")
+    assert not oauth.session_valide("s_inconnue")
+    sid = oauth.create_session()
+    assert oauth.session_valide(sid)
+    monkeypatch.setattr(oauth.time, "time", lambda: 10**10)
+    assert not oauth.session_valide(sid)
+
+
+def test_revoquer_le_consentement_force_un_nouvel_ecran():
+    client_id = _client()
+    _, challenge = _pkce()
+    sid = _session_depuis(_consent_reponse(client_id, challenge)[2])
+    assert oauth.authorize_get(_qs(client_id, challenge), f"mcp_session={sid}")[0] == 302
+    assert oauth.revoke_grant(client_id) == 1
+    assert oauth.authorize_get(_qs(client_id, challenge), f"mcp_session={sid}")[0] == 200
+
+
+def test_revoquer_un_client_coupe_jetons_et_consentements():
+    client_id = _client()
+    verifier, challenge = _pkce()
+    auth_code = _consent(client_id, challenge)
+    status, resp, _ = _echange(client_id, _REDIRECTION, auth_code, verifier)
+    jeton = json.loads(resp)["access_token"]
+    assert oauth.validate_token(jeton)
+    bilan = oauth.revoke_client(client_id)
+    assert bilan == {"client": True, "consentements": 1, "jetons": 1}
+    assert not oauth.validate_token(jeton)
+    assert client_id not in oauth._clients
+
+
+def test_point_de_revocation_rfc7009():
+    client_id = _client()
+    verifier, challenge = _pkce()
+    jeton = json.loads(_echange(client_id, _REDIRECTION,
+                                _consent(client_id, challenge), verifier)[1])["access_token"]
+    status, _, _ = oauth.oauth_revoke(
+        urllib.parse.urlencode({"token": jeton}).encode(), "application/x-www-form-urlencoded")
+    assert status == 200 and not oauth.validate_token(jeton)
+    # la cle maitre ne se revoque pas par ce chemin
+    oauth.oauth_revoke(b"token=SECRET123", "application/x-www-form-urlencoded")
+    assert oauth.validate_master("SECRET123")
+    assert "revocation_endpoint" in oauth.metadata()
+
+
+@pytest.mark.parametrize("omis", ["redirect_uri", "client_id"])
+def test_echange_sans_redirect_uri_ou_client_id_est_refuse(omis):
+    client_id = _client()
+    verifier, challenge = _pkce()
+    auth_code = _consent(client_id, challenge)
+    status, resp, _ = _echange(client_id, _REDIRECTION, auth_code, verifier, omis=(omis,))
+    assert status == 400 and json.loads(resp)["error"] == "invalid_request"
+
+
+def test_enregistrement_plafonne_et_purge_les_clients_sans_consentement(monkeypatch):
+    monkeypatch.setattr(oauth, "_MAX_CLIENTS", 3)
+    gardes = [oauth.handle_register({"redirect_uris": [_REDIRECTION]})["client_id"]
+              for _ in range(3)]
+    with pytest.raises(ValueError):
+        oauth.handle_register({"redirect_uris": [_REDIRECTION]})
+    # un client ancien et sans consentement est purge, un client consenti reste
+    _, challenge = _pkce()
+    _consent(gardes[0], challenge)
+    for cid in gardes:
+        oauth._clients[cid]["client_id_issued_at"] = 0
+    nouveau = oauth.handle_register({"redirect_uris": [_REDIRECTION]})["client_id"]
+    assert gardes[0] in oauth._clients and nouveau in oauth._clients
+    assert gardes[1] not in oauth._clients and gardes[2] not in oauth._clients
+
+
+def test_ecriture_impossible_est_journalisee(monkeypatch, tmp_path, caplog):
+    fichier_bloquant = tmp_path / "pas-un-dossier"
+    fichier_bloquant.write_text("x")
+    monkeypatch.setattr(oauth, "_DATA_DIR", fichier_bloquant / "sous")
+    with caplog.at_level("WARNING", logger="sspcloud_mcp.oauth"):
+        oauth._ecrit(fichier_bloquant / "sous" / "clients.json", {"a": 1})
+    assert "ne survivra pas" in caplog.text

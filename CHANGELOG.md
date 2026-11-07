@@ -9,6 +9,11 @@
   maitre reste acceptee pour l'acces a l'API, mais elle seule peut consentir. Le serveur
   refuse de demarrer ouvert sans `PASSERELLE_MCP_BEARER`. Les clients deja connectes avec
   la cle maitre continuent de fonctionner ; changer la cle les deconnecte.
+- **Session de navigateur opaque** : le cookie `mcp_session` ne contient plus la cle maitre (l'ancien
+  `mcp_api_key` est ignore et efface) ; 30 jours. `/oauth/token` exige `client_id` et `redirect_uri`.
+  Revocation : `revoke_grant`, `revoke_client` et `POST /oauth/revoke` (RFC 7009) ; un consentement
+  revoque redemande l'ecran. `/register` est plafonne (500 clients) et purge les clients sans
+  consentement apres 24 h. Une ecriture d'etat OAuth impossible est journalisee.
 - **Comparaisons** : plus de `TypeError` sur une cle, un cookie ou un champ non ASCII.
 - **Arguments d'agent** : `dest`, `branch`, `source` (push_repo), `path`/`depth` (list_files),
   `project` (session_start, gpu_switch) et `workdir` sont valides (refus `INVALID_ARGUMENT`)

@@ -94,7 +94,9 @@ class _Handler(BaseHTTPRequestHandler):
             # où elle finit et attend le délai (clients MCP : ReadTimeout).
             self.send_header("Content-Length", "0")
         for k, v in hdrs.items():
-            self.send_header(k, v)
+            # Une liste donne plusieurs en-tetes du meme nom (ex. plusieurs Set-Cookie).
+            for valeur in (v if isinstance(v, (list, tuple)) else [v]):
+                self.send_header(k, valeur)
         self.end_headers()
         if body:
             self.wfile.write(body)
@@ -203,6 +205,11 @@ class _Handler(BaseHTTPRequestHandler):
             code, body, extra = oauth.authorize_confirm(
                 form, q, self.headers.get("Cookie", ""))
             self._send(code, body, extra.get("Content-Type", "text/html"), extra)
+            return
+        if _OAUTH and path == "/oauth/revoke":
+            raw = self._read_body()
+            code, body, extra = oauth.oauth_revoke(raw, self.headers.get("Content-Type", ""))
+            self._send(code, body, extra.get("Content-Type", "application/json"), extra)
             return
         if _OAUTH and path == "/oauth/token":
             raw = self._body

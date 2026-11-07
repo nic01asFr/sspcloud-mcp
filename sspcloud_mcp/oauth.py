@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
 import threading
@@ -36,16 +37,25 @@ _pending_codes: dict[str, dict] = {}
 _clients: dict[str, dict] = {}
 _grants: dict[str, float] = {}          # "client_id|redirect_uri" -> horodatage
 _tokens: dict[str, dict] = {}           # sha256(jeton) -> metadonnees
+_sessions: dict[str, dict] = {}         # sha256(session) -> metadonnees (cookie opaque)
 _ecriture = threading.Lock()
 
 _DATA_DIR = Path(os.getenv("MCP_OAUTH_DATA", "/home/onyxia/work/.passerelle/oauth"))
 _CLIENTS_FILE = _DATA_DIR / "clients.json"
 _GRANTS_FILE = _DATA_DIR / "grants.json"
 _TOKENS_FILE = _DATA_DIR / "tokens.json"
+_SESSIONS_FILE = _DATA_DIR / "sessions.json"
 
 _PREFIXE_JETON = "pmcp_"
 _TTL_JETON_S = 90 * 24 * 3600
 _TTL_CODE_S = 600
+_TTL_SESSION_S = 30 * 24 * 3600
+_COOKIE_SESSION = "mcp_session"
+_COOKIE_ANCIEN = "mcp_api_key"          # ancien cookie (cle maitre en clair) : ignore et efface
+_MAX_CLIENTS = 500
+_TTL_CLIENT_SANS_CONSENTEMENT_S = 24 * 3600
+
+log = logging.getLogger("sspcloud_mcp.oauth")
 
 
 def _base_url() -> str:
@@ -88,15 +98,19 @@ def _ecrit(fichier: Path, donnees) -> None:
         temporaire = fichier.with_suffix(fichier.suffix + ".tmp")
         temporaire.write_text(json.dumps(donnees, indent=2), encoding="utf-8")
         temporaire.replace(fichier)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # Sans cela, jetons et consentements ne vivraient qu'en memoire et
+        # disparaitraient au redemarrage, sans une ligne pour l'expliquer.
+        log.warning("ecriture de %s impossible (%s : %s) : cet etat ne survivra pas "
+                    "au redemarrage", fichier.name, type(exc).__name__, exc)
 
 
 def _recharge_tout() -> None:
-    global _clients, _grants, _tokens
+    global _clients, _grants, _tokens, _sessions
     _clients = _charge(_CLIENTS_FILE, {}) or {}
     _grants = _charge(_GRANTS_FILE, {}) or {}
     _tokens = _charge(_TOKENS_FILE, {}) or {}
+    _sessions = _charge(_SESSIONS_FILE, {}) or {}
 
 
 _recharge_tout()
@@ -149,6 +163,72 @@ def list_tokens() -> list[dict]:
     ]
 
 
+def create_session() -> str:
+    """Session de navigateur opaque : le cookie ne contient JAMAIS la cle maitre."""
+    sid = f"s_{secrets.token_urlsafe(32)}"
+    with _ecriture:
+        _sessions[_empreinte(sid)] = {"expires_at": int(time.time()) + _TTL_SESSION_S}
+        _ecrit(_SESSIONS_FILE, _sessions)
+    return sid
+
+
+def session_valide(sid) -> bool:
+    if not sid or not isinstance(sid, str):
+        return False
+    cle = _empreinte(sid)
+    meta = _sessions.get(cle)
+    if not meta:
+        return False
+    if time.time() > float(meta.get("expires_at", 0)):
+        with _ecriture:
+            _sessions.pop(cle, None)
+            _ecrit(_SESSIONS_FILE, _sessions)
+        return False
+    return True
+
+
+def revoke_grant(client_id: str, redirect_uri: str | None = None) -> int:
+    """Retire le consentement d'un client (ou d'un couple client + redirection).
+
+    Sans cela, un client dont on revoque le jeton se re-autoriserait en silence
+    tant que la session du navigateur est valide. Retourne le nombre retire.
+    """
+    with _ecriture:
+        if redirect_uri is None:
+            cles = [k for k in _grants if k.split("|", 1)[0] == client_id]
+        else:
+            cles = [k for k in _grants if k == _cle_grant(client_id, redirect_uri)]
+        for k in cles:
+            _grants.pop(k, None)
+        if cles:
+            _ecrit(_GRANTS_FILE, _grants)
+    return len(cles)
+
+
+def revoke_client(client_id: str) -> dict:
+    """Coupe un client : enregistrement, consentements et tous ses jetons."""
+    with _ecriture:
+        existait = _clients.pop(client_id, None) is not None
+        if existait:
+            _ecrit(_CLIENTS_FILE, _clients)
+        jetons = [e for e, m in _tokens.items() if m.get("client_id") == client_id]
+        for e in jetons:
+            _tokens.pop(e, None)
+        if jetons:
+            _ecrit(_TOKENS_FILE, _tokens)
+    return {"client": existait, "consentements": revoke_grant(client_id),
+            "jetons": len(jetons)}
+
+
+def oauth_revoke(raw: bytes, ctype: str) -> tuple[int, bytes, dict]:
+    """RFC 7009 : le porteur d'un jeton derive peut le revoquer. Reponse 200 toujours."""
+    form = _parse_form(raw, ctype)
+    jeton = form.get("token", "")
+    if isinstance(jeton, str) and jeton.startswith(_PREFIXE_JETON):
+        revoke_token(jeton)
+    return 200, b"{}", {"Content-Type": "application/json"}
+
+
 def validate_master(token: str) -> bool:
     """La cle maitre, et elle seule. Sert au consentement humain.
 
@@ -192,6 +272,7 @@ def metadata() -> dict:
         "authorization_endpoint": f"{base}/authorize",
         "token_endpoint": f"{base}/oauth/token",
         "registration_endpoint": f"{base}/register",
+        "revocation_endpoint": f"{base}/oauth/revoke",
         "grant_types_supported": ["authorization_code", "client_credentials"],
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
@@ -226,6 +307,26 @@ def redirection_acceptable(uri: str) -> bool:
     return False
 
 
+def _purger_clients_sans_consentement() -> None:
+    """Retire les clients enregistres depuis plus de 24 h qui n'ont jamais consenti.
+
+    A appeler sous le verrou d'ecriture. /register est ouvert (DCR) : sans plafond
+    ni purge, n'importe qui ferait grossir clients.json.
+    """
+    maintenant = time.time()
+    avec_consentement = {k.split("|", 1)[0] for k in _grants}
+    avec_jeton = {m.get("client_id") for m in _tokens.values()}
+    retires = [
+        cid for cid, c in _clients.items()
+        if cid not in avec_consentement and cid not in avec_jeton
+        and maintenant - float(c.get("client_id_issued_at", 0)) > _TTL_CLIENT_SANS_CONSENTEMENT_S
+    ]
+    for cid in retires:
+        _clients.pop(cid, None)
+    if retires:
+        _ecrit(_CLIENTS_FILE, _clients)
+
+
 def handle_register(body: dict) -> dict:
     """DCR. Les redirections sont PERSISTEES : /authorize valide contre elles.
 
@@ -238,6 +339,10 @@ def handle_register(body: dict) -> dict:
     if any(not redirection_acceptable(u) for u in uris):
         raise ValueError("redirections HTTPS, ou HTTP en loopback, uniquement")
     client_id = secrets.token_urlsafe(16)
+    with _ecriture:
+        _purger_clients_sans_consentement()
+        if len(_clients) >= _MAX_CLIENTS:
+            raise ValueError("trop de clients enregistres : reessayez plus tard")
     client = {
         "client_id": client_id,
         "client_id_issued_at": int(time.time()),
@@ -395,17 +500,7 @@ def authorize_get(query: str, cookie_header: str) -> tuple[int, bytes, dict]:
     if refus:
         return refus
 
-    cookie_key = ""
-    if cookie_header:
-        c = SimpleCookie()
-        try:
-            c.load(cookie_header)
-        except Exception:
-            c = SimpleCookie()
-        if "mcp_api_key" in c:
-            cookie_key = c["mcp_api_key"].value
-
-    connu = validate_master(cookie_key)
+    connu = session_valide(_lire_cookie(cookie_header, _COOKIE_SESSION))
     if connu and grant_existe(client_id, redirect_uri):
         return _issue_auth_code(client_id, code_challenge, redirect_uri, state)
 
@@ -420,6 +515,17 @@ def authorize_get(query: str, cookie_header: str) -> tuple[int, bytes, dict]:
     nom = (_clients.get(client_id) or {}).get("client_name") or client_id
     return _page_consentement(qs, _echappe(nom), _echappe(redirect_uri),
                               demande_cle=not connu)
+
+
+def _lire_cookie(cookie_header: str, nom: str) -> str:
+    if not cookie_header:
+        return ""
+    c = SimpleCookie()
+    try:
+        c.load(cookie_header)
+    except Exception:
+        return ""
+    return c[nom].value if nom in c else ""
 
 
 def _echappe(texte: str) -> str:
@@ -449,27 +555,25 @@ def authorize_confirm(form: dict, query: str,
         return refus
 
     api_key = (form.get("api_key") or "").strip()
-    if not validate_master(api_key):
-        cookie = ""
-        if cookie_header:
-            c = SimpleCookie()
-            try:
-                c.load(cookie_header)
-            except Exception:
-                c = SimpleCookie()
-            if "mcp_api_key" in c:
-                cookie = c["mcp_api_key"].value
-        if not validate_master(cookie):
-            return 401, "<p>Clé d'accès invalide.</p>".encode("utf-8"), {
-                "Content-Type": "text/html; charset=utf-8"}
-        api_key = cookie
+    sid_cookie = _lire_cookie(cookie_header, _COOKIE_SESSION)
+    if validate_master(api_key):
+        sid = create_session()          # cle saisie : nouvelle session opaque
+    elif session_valide(sid_cookie):
+        sid = sid_cookie                # session deja ouverte sur ce navigateur
+    else:
+        return 401, "<p>Clé d'accès invalide.</p>".encode("utf-8"), {
+            "Content-Type": "text/html; charset=utf-8"}
 
     memorise_grant(client_id, redirect_uri)
     code, body, hdrs = _issue_auth_code(
         client_id, code_challenge, redirect_uri, _p("state"))
-    hdrs["Set-Cookie"] = (
-        f"mcp_api_key={api_key}; HttpOnly; Secure; SameSite=Lax; "
-        f"Max-Age={90 * 24 * 3600}; Path=/")
+    # Le cookie est un identifiant de session sans valeur par lui-meme ; l'ancien
+    # cookie (cle maitre en clair) est efface s'il traine dans ce navigateur.
+    hdrs["Set-Cookie"] = [
+        f"{_COOKIE_SESSION}={sid}; HttpOnly; Secure; SameSite=Lax; "
+        f"Max-Age={_TTL_SESSION_S}; Path=/",
+        f"{_COOKIE_ANCIEN}=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/",
+    ]
     return code, body, hdrs
 
 
@@ -514,15 +618,17 @@ def oauth_token(raw: bytes, ctype: str) -> tuple[int, bytes, dict]:
             return _erreur_json(400, "invalid_grant", "PKCE invalide.")
 
         # Le code est lie au client et a la redirection qui l'ont obtenu.
+        # Obligatoires : tous deux sont connus a l'autorisation, et les omettre ne
+        # doit pas dispenser de les rapprocher du code.
         redirect_uri = form.get("redirect_uri", "")
-        if redirect_uri and not _egal(
-            redirect_uri, pending.get("redirect_uri", "")
-        ):
+        if not redirect_uri:
+            return _erreur_json(400, "invalid_request", "redirect_uri requis.")
+        if not _egal(redirect_uri, pending.get("redirect_uri", "")):
             return _erreur_json(400, "invalid_grant", "redirect_uri ne correspond pas.")
         client_id = form.get("client_id", "")
-        if client_id and not _egal(
-            client_id, pending.get("client_id", "")
-        ):
+        if not client_id:
+            return _erreur_json(400, "invalid_request", "client_id requis.")
+        if not _egal(client_id, pending.get("client_id", "")):
             return _erreur_json(400, "invalid_grant", "client_id ne correspond pas.")
 
         cid = pending.get("client_id", "")

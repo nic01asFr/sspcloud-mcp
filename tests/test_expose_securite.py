@@ -85,14 +85,24 @@ def test_port_invalide_est_refuse(kubectl_espion, port):
     assert kubectl_espion == []
 
 
-def test_expose_public_port_non_numerique(kubectl_espion):
-    class Mgr:
-        def get(self, sid):
-            raise AssertionError
+class _MgrSansSession:
+    def get(self, sid):
+        raise AssertionError
 
+
+@pytest.mark.parametrize("port", ["abc", True, 80.9, "80.9", [8000], "-1"])
+def test_expose_public_port_non_entier_est_refuse(kubectl_espion, port):
     with pytest.raises(MCPToolError) as e:
-        asyncio.run(tools.expose_public(Mgr(), {"pod": "p", "namespace": "ns", "port": "abc"}))
+        asyncio.run(tools.expose_public(
+            _MgrSansSession(), {"pod": "p", "namespace": "ns", "port": port}))
     assert e.value.code == "INVALID_ARGUMENT"
+    assert kubectl_espion == []
+
+
+def test_expose_public_accepte_un_port_en_chaine_numerique(kubectl_espion):
+    out = asyncio.run(tools.expose_public(
+        _MgrSansSession(), {"pod": "p", "namespace": "ns", "port": "8080"}))
+    assert out["port"] == 8080
 
 
 def test_unexpose_refuse_un_namespace_dangereux(kubectl_espion):

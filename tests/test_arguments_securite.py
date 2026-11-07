@@ -45,7 +45,7 @@ def _push(mgr, source, **kw):
 # ── repo_sync : dest, branch, url ────────────────────────────────────────────
 
 @pytest.mark.parametrize("dest", [
-    ".", "..", "../x", "/etc", "*", "a b", "a;b", "$(id)", "`id`", "a\nb", "x/../y", "-rf", ".caché",
+    ".", "..", "../x", "/etc", "*", "a b", "a;b", "$(id)", "`id`", "a\nb", "x/../y", "-rf", ".caché", "-x",
 ])
 def test_dest_dangereux_est_refuse_sans_rien_executer(dest):
     mgr = FauxMgr()
@@ -150,3 +150,19 @@ def test_exec_shell_cite_le_workdir(monkeypatch):
     transports.exec_shell("pod", "ns", "ls", workdir="/tmp/x; id")
     script = vus[0][-1]
     assert script.startswith("cd '/tmp/x; id' && ")
+
+
+@pytest.mark.parametrize("dest", [".github", "_template", "org/.config", "a.b_c-d"])
+def test_dossiers_caches_et_souligne_restent_acceptes(dest):
+    mgr = FauxMgr()
+    _push(mgr, "https://github.com/org/repo.git", dest=dest)
+    assert len(mgr.commandes) == 1
+
+
+def test_exec_shell_garde_le_tilde(monkeypatch):
+    vus = []
+    monkeypatch.setattr(transports, "kubectl",
+                        lambda *a, **k: (vus.append(a), (0, "", ""))[1])
+    monkeypatch.setattr(transports, "_raise_if_forbidden", lambda rc, err: None)
+    transports.exec_shell("pod", "ns", "ls", workdir="~/work")
+    assert vus[0][-1].startswith('cd "$HOME"/work && ')
