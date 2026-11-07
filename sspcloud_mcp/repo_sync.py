@@ -15,9 +15,11 @@ from __future__ import annotations
 import base64
 import io
 import re
+import shlex
 import tarfile
 from pathlib import Path
 
+from . import validation as V
 from .errors import bad_source, MCPToolError
 
 _MAX_LOCAL_MB = 40
@@ -55,12 +57,13 @@ async def push_repo(mgr, session_id: str, source: str, *,
 
 
 async def _push_git(mgr, session_id, s, source, dest, branch) -> dict:
-    url = _normalize_git(source)
-    name = dest or re.sub(r"\.git$", "", url.rstrip("/").split("/")[-1])
-    target = f"{s.workdir}/{name}"
-    br = f"-b {branch}" if branch else ""
-    cmd = (f"rm -rf {target} && git clone --depth 1 {br} {url} {target} 2>&1 "
-           f"&& cd {target} && git rev-parse --short HEAD")
+    url = V.url_git(_normalize_git(source))
+    name = V.destination(dest or re.sub(r"\.git$", "", url.rstrip("/").split("/")[-1]))
+    target = f"{s.workdir.rstrip('/')}/{name}"
+    br = f"-b {shlex.quote(V.reference_git(branch))} " if branch else ""
+    qt = shlex.quote(target)
+    cmd = (f"rm -rf -- {qt} && git clone --depth 1 {br}-- {shlex.quote(url)} {qt} 2>&1 "
+           f"&& cd {qt} && git rev-parse --short HEAD")
     r = await mgr.exec_bash(session_id, cmd, timeout=300)
     if r["rc"] != 0:
         raise MCPToolError("GIT_CLONE_FAILED",

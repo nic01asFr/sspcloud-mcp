@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import socket
 import subprocess
 import time
@@ -94,7 +95,7 @@ def find_jupyter_pod(namespace: str, name_filter: str = "") -> str | None:
 def exec_shell(pod: str, namespace: str, script: str,
                timeout: int = 120, workdir: str = "") -> tuple[int, str, str]:
     """Exécute un script bash dans le pod via kubectl exec. Login shell."""
-    full = f"cd {workdir} && {script}" if workdir else script
+    full = f"cd {shlex.quote(workdir)} && {script}" if workdir else script
     rc, out, err = kubectl(
         "exec", pod, "--", "bash", "-lc", full,
         namespace=namespace, timeout=timeout)
