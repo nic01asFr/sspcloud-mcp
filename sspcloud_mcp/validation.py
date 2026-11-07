@@ -20,6 +20,8 @@ _NOM_PROJET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 _SEGMENT = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
 _DESTINATION = re.compile(rf"^{_SEGMENT}(/{_SEGMENT}){{0,7}}$")
 _REFERENCE_GIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+_NOM_K8S = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")
+_CHEMIN_HTTP = re.compile(r"^/[A-Za-z0-9._~/-]{0,199}$")
 _URL_GIT = re.compile(r"^[A-Za-z0-9@:/._~%+=?&#-]{1,500}$")
 
 
@@ -75,3 +77,29 @@ def chemin_pour_cd(chemin: str) -> str:
     if chemin.startswith("~/"):
         return '"$HOME"/' + shlex.quote(chemin[2:])
     return shlex.quote(chemin)
+
+
+def nom_k8s(nom: str, valeur) -> str:
+    """Nom de ressource Kubernetes (DNS-1123) : minuscules, chiffres, '-' et '.'."""
+    if (not isinstance(valeur, str) or len(valeur) > 253
+            or not _NOM_K8S.match(valeur)):
+        raise argument_invalide(
+            nom, valeur, "un nom Kubernetes : minuscules, chiffres, '-' et '.', "
+            "commencant et finissant par un caractere alphanumerique.")
+    return valeur
+
+
+def port(valeur) -> int:
+    """Port TCP : un entier de 1 a 65535 (un booleen ou une chaine numerique est refuse)."""
+    if isinstance(valeur, bool) or not isinstance(valeur, int) or not 1 <= valeur <= 65535:
+        raise argument_invalide("port", valeur, "un entier de 1 a 65535.")
+    return valeur
+
+
+def chemin_http(valeur) -> str:
+    """Chemin d'URL : commence par '/', caracteres surs seulement."""
+    if not isinstance(valeur, str) or not _CHEMIN_HTTP.match(valeur) or ".." in valeur:
+        raise argument_invalide(
+            "path", valeur, "un chemin d'URL commencant par '/', sans espace ni '..', "
+            "ex. '/' ou '/app'.")
+    return valeur

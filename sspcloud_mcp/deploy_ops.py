@@ -7,12 +7,14 @@ Wrappers async autour du SDK Passerelle (provision, deploy, status, list pods).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import tempfile
 import zipfile
 from pathlib import Path
 
 from . import transports as T
+from . import validation as V
 from .errors import MCPToolError
 
 _DEFAULT_WORKDIR = "/home/onyxia/work"
@@ -146,49 +148,44 @@ async def expose_pod(pod: str, namespace: str, port: int = 8000,
     le wildcard `*.user.lab.sspcloud.fr`), via le ServiceAccount du pod — sans
     passer par le portail Onyxia. C'est le patron des pods « bridge » existants.
     """
+    pod = V.nom_k8s("pod", pod)
+    namespace = V.nom_k8s("namespace", namespace)
+    port = V.port(port)
+    path = V.chemin_http(path or "/")
     slug = _expose_slug(name or pod)
     host = f"{namespace}-{slug}.user.lab.sspcloud.fr"
     svc, ing = f"{slug}-svc", f"{slug}-ingress"
-    path = path or "/"
-    manifest = f"""apiVersion: v1
-kind: Service
-metadata:
-  name: {svc}
-  labels:
-    app.kubernetes.io/managed-by: sspcloud-mcp
-spec:
-  selector:
-    statefulset.kubernetes.io/pod-name: {pod}
-  ports:
-  - port: {port}
-    targetPort: {port}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {ing}
-  labels:
-    app.kubernetes.io/managed-by: sspcloud-mcp
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-spec:
-  ingressClassName: onyxia
-  rules:
-  - host: {host}
-    http:
-      paths:
-      - backend:
-          service:
-            name: {svc}
-            port:
-              number: {port}
-        path: {path}
-        pathType: Prefix
-  tls:
-  - hosts:
-    - {host}
-"""
+    etiquettes = {"app.kubernetes.io/managed-by": "sspcloud-mcp"}
+    # Construit en objets puis serialise : aucune valeur d'agent n'est jamais
+    # inseree dans du texte YAML (un saut de ligne ou un '---' ajoutait des champs
+    # ou un second document applique avec le compte de service du pod).
+    service = {
+        "apiVersion": "v1", "kind": "Service",
+        "metadata": {"name": svc, "labels": etiquettes},
+        "spec": {
+            "selector": {"statefulset.kubernetes.io/pod-name": pod},
+            "ports": [{"port": port, "targetPort": port}],
+        },
+    }
+    ingress = {
+        "apiVersion": "networking.k8s.io/v1", "kind": "Ingress",
+        "metadata": {
+            "name": ing, "labels": etiquettes,
+            "annotations": {
+                "nginx.ingress.kubernetes.io/proxy-body-size": "0",
+                "nginx.ingress.kubernetes.io/proxy-read-timeout": "600",
+            },
+        },
+        "spec": {
+            "ingressClassName": "onyxia",
+            "rules": [{"host": host, "http": {"paths": [{
+                "backend": {"service": {"name": svc, "port": {"number": port}}},
+                "path": path, "pathType": "Prefix",
+            }]}}],
+            "tls": [{"hosts": [host]}],
+        },
+    }
+    manifest = json.dumps({"apiVersion": "v1", "kind": "List", "items": [service, ingress]})
     loop = asyncio.get_event_loop()
     rc, out, err = await loop.run_in_executor(
         None, lambda: T.kubectl("apply", "-f", "-", namespace=namespace,
@@ -205,6 +202,7 @@ spec:
 
 async def unexpose_pod(namespace: str, name: str) -> dict:
     """Retire l'exposition publique créée par expose_pod (Service + Ingress)."""
+    namespace = V.nom_k8s("namespace", namespace)
     slug = _expose_slug(name)
     loop = asyncio.get_event_loop()
     # Notation type/nom obligatoire : « delete service a ingress b » serait lu
