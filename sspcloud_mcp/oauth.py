@@ -58,6 +58,18 @@ def _master_key() -> str:
     return os.getenv("PASSERELLE_MCP_BEARER", "")
 
 
+def _egal(a, b) -> bool:
+    """Egalite a temps constant de deux chaines, sans jamais lever.
+
+    `secrets.compare_digest` leve TypeError sur une `str` non ASCII : un en-tete,
+    un cookie ou un champ de formulaire accentue faisait echouer la requete en
+    erreur de handler au lieu d'un refus. On compare donc des octets UTF-8.
+    """
+    if not isinstance(a, str) or not isinstance(b, str):
+        return False
+    return secrets.compare_digest(a.encode("utf-8", "replace"), b.encode("utf-8", "replace"))
+
+
 # ── Persistance ──────────────────────────────────────────────────────────────
 
 def _charge(fichier: Path, defaut):
@@ -145,7 +157,7 @@ def validate_master(token: str) -> bool:
     rien.
     """
     key = _master_key()
-    return bool(key) and bool(token) and secrets.compare_digest(token, key)
+    return bool(key) and bool(token) and _egal(token, key)
 
 
 def validate_token(token: str) -> bool:
@@ -247,7 +259,7 @@ def redirection_declaree(client_id: str, redirect_uri: str) -> bool:
     if not client or not redirect_uri:
         return False
     return any(
-        secrets.compare_digest(redirect_uri, declaree)
+        _egal(redirect_uri, declaree)
         for declaree in client.get("redirect_uris", [])
     )
 
@@ -498,17 +510,17 @@ def oauth_token(raw: bytes, ctype: str) -> tuple[int, bytes, dict]:
         challenge = base64.urlsafe_b64encode(
             hashlib.sha256(verifier.encode()).digest()
         ).rstrip(b"=").decode()
-        if not secrets.compare_digest(challenge, pending.get("code_challenge", "")):
+        if not _egal(challenge, pending.get("code_challenge", "")):
             return _erreur_json(400, "invalid_grant", "PKCE invalide.")
 
         # Le code est lie au client et a la redirection qui l'ont obtenu.
         redirect_uri = form.get("redirect_uri", "")
-        if redirect_uri and not secrets.compare_digest(
+        if redirect_uri and not _egal(
             redirect_uri, pending.get("redirect_uri", "")
         ):
             return _erreur_json(400, "invalid_grant", "redirect_uri ne correspond pas.")
         client_id = form.get("client_id", "")
-        if client_id and not secrets.compare_digest(
+        if client_id and not _egal(
             client_id, pending.get("client_id", "")
         ):
             return _erreur_json(400, "invalid_grant", "client_id ne correspond pas.")

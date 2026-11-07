@@ -283,3 +283,23 @@ def test_jeton_stocke_hache():
     assert jeton not in json.dumps(oauth._tokens), (
         "Les jetons doivent être stockés hachés."
     )
+
+
+# ── Comparaisons : jamais d'exception sur un caractere non ASCII ─────────────
+
+def test_cle_non_ascii_est_refusee_sans_exception():
+    """compare_digest sur des str non ASCII levait TypeError (500 au lieu de 401)."""
+    for faux in ("é", "clé-é", "SECRET123é", "\u00ff"):
+        assert oauth.validate_token(faux) is False
+        assert oauth.validate_master(faux) is False
+
+
+def test_redirection_non_ascii_est_refusee_sans_exception():
+    client = oauth.handle_register({"redirect_uris": [_REDIRECTION]})
+    assert oauth.redirection_declaree(client["client_id"], _REDIRECTION + "/é") is False
+
+
+def test_egal_refuse_les_non_chaines():
+    assert oauth._egal(None, "x") is False
+    assert oauth._egal("x", None) is False
+    assert oauth._egal("é", "é") is True
