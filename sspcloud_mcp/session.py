@@ -31,7 +31,7 @@ from . import onyxia_registry as O
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
 from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
-                     kernel_start_timeout)
+                     kernel_start_timeout, not_a_jupyter_pod)
 
 _REGISTRY = Path.home() / ".passerelle" / "mcp_sessions.json"
 _REGISTRY_SECRET = "mcp-sessions"
@@ -217,8 +217,15 @@ class SessionManager:
                 else:
                     port = await loop.run_in_executor(
                         None, lambda: T.jupyter_port(pod, namespace, ip))
+                    # jupyter_port rend un port par defaut meme si rien ne repond.
+                    # Un pod qui ne repond pas ET dont rien n'evoque Jupyter n'a pas
+                    # de noyau : le dire tout de suite plutot qu'apres un delai.
+                    if not await loop.run_in_executor(
+                            None, lambda: T.jupyter_alive(ip, port)):
+                        await self._refuser_si_pas_jupyter(pod, namespace)
                 s.base_url = f"http://{ip}:{port}"
             else:
+                await self._refuser_si_pas_jupyter(pod, namespace)
                 port = T.jupyter_port(pod, namespace)
                 s._pf = T.start_port_forward(pod, namespace, remote_port=port)
                 s.base_url = s._pf.base_url()
@@ -265,6 +272,20 @@ class SessionManager:
             await asyncio.sleep(8)
         raise pod_unreachable(pod, "Pod pas Running dans le délai imparti.")
 
+    async def _refuser_si_pas_jupyter(self, pod: str, namespace: str) -> None:
+        """Leve NOT_A_JUPYTER_POD si le pod n'a, de facon certaine, pas de Jupyter.
+
+        Sans reponse de kubectl (droits, reseau) on ne sait pas : on ne refuse pas.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            est = await loop.run_in_executor(
+                None, lambda: T.pod_indices_jupyter(pod, namespace))
+        except Exception:
+            return
+        if est is False:
+            raise not_a_jupyter_pod(pod, namespace)
+
     async def _reresolve(self, s: DevSession) -> bool:
         """Recalcule base_url (IP/port) d'un pod in-cluster. True si elle a changé."""
         if not (s.pod and T.in_cluster() and not s.base_url.startswith("https")):
@@ -299,6 +320,9 @@ class SessionManager:
             await kc.start(warmup=_FIRST_TRY_S)
         except Exception:
             await self._reresolve(s)       # recalcule IP/port si le pod a changé
+            if s.pod:
+                # Pas de seconde attente longue sur un pod qui n'a pas de Jupyter.
+                await self._refuser_si_pas_jupyter(s.pod, s.namespace)
             kc = KernelClient(s.base_url, token=s.token)
             await kc.start()               # pod en démarrage : attente normale
         s._kernel = kc
@@ -380,7 +404,7 @@ class SessionManager:
                     self.ensure_kernel(s),
                     timeout=max(deadline - loop.time(), 0.1))
             except asyncio.TimeoutError:
-                raise kernel_start_timeout(s.id, budget) from None
+                raise kernel_start_timeout(s.id, budget, s.pod) from None
             yield kc, max(deadline - loop.time(), 0.1)
         finally:
             lock.release()

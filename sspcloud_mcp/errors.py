@@ -11,16 +11,21 @@ from __future__ import annotations
 class MCPToolError(Exception):
     """Erreur d'outil MCP avec code + hint destinés à l'agent."""
 
-    def __init__(self, code: str, message: str, hint: str = ""):
+    def __init__(self, code: str, message: str, hint: str = "",
+                 extra: dict | None = None):
         self.code = code
         self.message = message
         self.hint = hint
+        # Champs machine (ex. suggested_tools) : un petit modele suit mieux un
+        # champ structure qu'une phrase.
+        self.extra = dict(extra or {})
         super().__init__(f"[{code}] {message}")
 
     def to_dict(self) -> dict:
         return {"error": {"code": self.code,
                           "message": self.message,
-                          "hint": self.hint}}
+                          "hint": self.hint,
+                          **self.extra}}
 
 
 # ── Codes standards ───────────────────────────────────────────────────────────
@@ -79,12 +84,43 @@ def session_busy(session_id: str, waited: float) -> MCPToolError:
     )
 
 
-def kernel_start_timeout(session_id: str, seconds: float) -> MCPToolError:
+def kernel_start_timeout(session_id: str, seconds: float, pod: str = "") -> MCPToolError:
+    cible = f"pod/{pod}" if pod else "pod/<nom du pod>"
     return MCPToolError(
         "KERNEL_START_TIMEOUT",
         f"Kernel de la session {session_id!r} non prêt en {seconds:.0f}s.",
-        "Le pod est peut-être surchargé ou en cours de reprise. Réessayez ; "
-        "si l'erreur persiste, session_status puis session_start.",
+        "Si le pod vient de démarrer ou de reprendre, attendez 30 à 60 s puis réessayez "
+        "UNE fois. Après 2 échecs de suite, ne réessayez plus : appelez "
+        f"workload_status(target='{cible}') pour savoir si le pod tourne, puis "
+        "workload_logs pour comprendre pourquoi. Un pod qui n'exécute pas Jupyter "
+        "répond NOT_A_JUPYTER_POD.",
+        extra={"suggested_tools": ["workload_status", "workload_logs", "workload_events"],
+               "target": cible},
+    )
+
+
+def not_a_jupyter_pod(pod: str, namespace: str = "") -> MCPToolError:
+    cible = f"pod/{pod}"
+    return MCPToolError(
+        "NOT_A_JUPYTER_POD",
+        f"Le pod {pod!r} n'exécute pas Jupyter : exec, read_file, write_file, "
+        "list_files, job_poll et push_repo n'y fonctionnent pas.",
+        "Pour le lire sans noyau : workload_status, workload_logs ou workload_events "
+        f"(target='{cible}'). Pour exécuter du code, session_start sur un pod jupyter-* "
+        "(list_pods indique les pods du namespace).",
+        extra={"suggested_tools": ["workload_status", "workload_logs", "workload_events"],
+               "target": cible,
+               **({"namespace": namespace} if namespace else {})},
+    )
+
+
+def unknown_argument(tool: str, proches: dict[str, str], inconnus: list[str]) -> MCPToolError:
+    suggestions = ", ".join(f"{a!r} -> {b!r}" for a, b in proches.items())
+    return MCPToolError(
+        "UNKNOWN_ARGUMENT",
+        f"{tool} : argument(s) inconnu(s) : {', '.join(sorted(inconnus))}.",
+        f"Vouliez-vous dire : {suggestions} ? Rien n'a été exécuté.",
+        extra={"suggestions": proches},
     )
 
 

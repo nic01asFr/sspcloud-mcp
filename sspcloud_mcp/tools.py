@@ -643,7 +643,7 @@ TOOLS: dict = {
         "(cold start ~5-8 min), ensuite = scale rapide (env PVC du projet préservé). "
         "Retourne une session attachée au kernel GPU.",
         _s({"project": _STR, "preempt": _BOOL, "idle_minutes": _INT,
-            "namespace": _STR, "session_id": _STR}, ["project"])),
+            "namespace": _STR, "session_id": _STR, "name": _STR}, ["project"])),
 
     "gpu_release": (gpu_release,
         "Scale 0 le pod GPU actif (ou d'un projet) → libère le slot GPU pour un "
@@ -661,13 +661,15 @@ TOOLS: dict = {
 
     "project_bind": (project_bind,
         "Attache une session dev à un pod existant (nom ou filtre projet).",
-        _s({"project": _STR, "pod": _STR, "namespace": _STR, "session_id": _STR}, [])),
+        _s({"project": _STR, "pod": _STR, "namespace": _STR, "session_id": _STR,
+            "attach_pod": _STR}, [])),
 
     "project_start": (project_start,
         "Lance un pod helm dédié pour un projet (jupyter-python, ou GPU avec "
         "gpu=true). Visible dans Onyxia « Mes services » ; retourne aussi `acces` "
         "(NOTES.txt : URL, mot de passe masqué). `chart` n'est pas pris en compte.",
-        _s({"project": _STR, "gpu": _BOOL, "chart": _STR, "namespace": _STR}, ["project"])),
+        _s({"project": _STR, "gpu": _BOOL, "chart": _STR, "namespace": _STR,
+            "name": _STR, "session_id": _STR}, ["project"])),
 
     "service_scaffold": (service_scaffold,
         "Génère un fichier <name>.service.yml minimal dans le workspace pod.",

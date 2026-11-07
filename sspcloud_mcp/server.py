@@ -19,15 +19,19 @@ ou via l'entry point `sspcloud-mcp`.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import sys
 import threading
 
 from .tools import TOOLS
 from .session import SessionManager
-from .errors import MCPToolError
+from .errors import MCPToolError, unknown_argument
 
 PROTOCOL_VERSION = "2024-11-05"
+# Versions que ce serveur sait parler, de la plus recente a la plus ancienne. Le client
+# propose la sienne ; on la prend si on la connait, sinon on repond avec la plus recente.
+SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 SERVER_INFO = {"name": "sspcloud-mcp", "version": "0.5.0"}
 
 
@@ -39,9 +43,10 @@ def _tools_list() -> list[dict]:
 async def _dispatch(mgr: SessionManager, method: str, params: dict):
     """Traite une méthode MCP. Retourne le `result` (dict) ou lève."""
     if method == "initialize":
-        client_version = params.get("protocolVersion", PROTOCOL_VERSION)
+        demandee = params.get("protocolVersion")
+        version = demandee if demandee in SUPPORTED_PROTOCOLS else SUPPORTED_PROTOCOLS[0]
         return {
-            "protocolVersion": client_version,
+            "protocolVersion": version,
             "capabilities": {"tools": {}},
             "serverInfo": SERVER_INFO,
         }
@@ -67,7 +72,19 @@ async def _dispatch(mgr: SessionManager, method: str, params: dict):
                 f"Reçus : {', '.join(sorted(args)) or 'aucun'}. "
                 f"Attendus : {', '.join(entry[2].get('required') or [])}. "
                 f"Facultatifs : {', '.join(sorted(set(entry[2].get('properties', {})) - set(entry[2].get('required') or [])))}.")
+        # Argument inconnu : s'il ressemble a un argument facultatif (faute de frappe,
+        # ex. `attach_pods`), on refuse avant d'agir plutot que de partir sur un autre
+        # chemin sans erreur. Sinon on l'ignore, et on le dit dans le resultat.
+        connus = entry[2].get("properties", {})
+        inconnus = [a for a in args if a not in connus]
+        if inconnus:
+            proches = {a: p[0] for a in inconnus
+                       if (p := difflib.get_close_matches(a, list(connus), n=1, cutoff=0.75))}
+            if proches:
+                raise unknown_argument(name, proches, inconnus)
         result = await handler(mgr, args)
+        if inconnus and isinstance(result, dict):
+            result = {**result, "arguments_ignores": sorted(inconnus)}
         return {"content": [{"type": "text",
                              "text": json.dumps(result, ensure_ascii=False)}],
                 "isError": False}
