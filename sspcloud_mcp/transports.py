@@ -72,6 +72,22 @@ def pod_ip(pod: str, namespace: str) -> str:
     return out.strip()
 
 
+def pod_indices_jupyter(pod: str, namespace: str) -> bool | None:
+    """Le pod est-il un pod Jupyter ? True / False, ou None si on ne peut pas le savoir.
+
+    Indices : le nom, les etiquettes et l'image des conteneurs. Un pod dont rien
+    ne mentionne Jupyter (service FastAPI, base de donnees...) n'a pas de noyau :
+    inutile de lui laisser plusieurs minutes pour en demarrer un.
+    """
+    rc, out, _ = kubectl(
+        "get", "pod", pod, "-o",
+        "jsonpath={.metadata.name} {.metadata.labels} {.spec.containers[*].image}",
+        namespace=namespace, timeout=15)
+    if rc != 0 or not out.strip():
+        return None
+    return "jupyter" in out.lower()
+
+
 def find_jupyter_pod(namespace: str, name_filter: str = "") -> str | None:
     """Retourne le 1er pod Running dont le nom matche (défaut : jupyter)."""
     rc, out, err = kubectl(

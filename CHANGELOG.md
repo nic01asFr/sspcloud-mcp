@@ -19,6 +19,17 @@
   `project` (session_start, gpu_switch) et `workdir` sont valides (refus `INVALID_ARGUMENT`)
   puis cites avant d'atteindre un shell. `expose_public` construit son manifeste en objets
   (JSON) au lieu de YAML texte ; `pod`, `namespace`, `port` et `path` sont valides.
+- **Pre-vol Jupyter** : `session_start(attach_pod=...)` et `ensure_kernel` refusent tout de suite un pod
+  dont rien n'evoque Jupyter (`NOT_A_JUPYTER_POD`, avec `suggested_tools` = `workload_status`,
+  `workload_logs`, `workload_events` et `target`), au lieu de laisser plusieurs minutes de
+  `KERNEL_START_TIMEOUT`. Un pod Jupyter qui demarre garde l'attente ; sans reponse de kubectl on
+  ne refuse pas. Le hint de `KERNEL_START_TIMEOUT` ne dit plus « Reessayez » sans fin : une fois, puis
+  `workload_status`. `MCPToolError` accepte des champs machine (`extra`).
+- **Protocole** : `initialize` negocie la version (2025-06-18, 2025-03-26, 2024-11-05) au lieu de
+  renvoyer celle du client. Un argument facultatif mal orthographie (proche d'un argument connu) est
+  refuse (`UNKNOWN_ARGUMENT`, avec suggestion) avant toute action ; un autre argument inconnu est
+  ignore et liste dans `arguments_ignores`. Les arguments lus par `gpu_switch`, `project_bind` et
+  `project_start` sans etre declares le sont maintenant.
 - **Reste a faire** : CORS restreint aux origines attendues, plafond du flux SSE.
 
 - **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture
