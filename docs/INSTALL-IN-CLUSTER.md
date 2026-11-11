@@ -3,10 +3,15 @@
 Ce guide montre, écran par écran, comment **installer le service pour vous-même**, dans
 **votre** namespace SSPCloud, avec les droits de **votre** pod.
 
-> **Usage strictement individuel.** Le service tourne dans votre namespace, opère avec le
-> ServiceAccount de votre pod, et n'accède **jamais** aux pods d'un autre utilisateur.
+> **Usage strictement individuel.** Le service tourne dans votre namespace et n'accède
+> **jamais** aux pods d'un autre utilisateur.
 > Il fonctionne **même si votre compte est restreint** (`stsonly`, sans droits kubectl
 > directs) : c'est le pod, pas votre jeton personnel, qui porte les droits.
+>
+> **ServiceAccount :** avec le rôle `admin` (recommandé), le service dispose de son propre
+> SA dédié `mcp`, indépendant du pod lanceur. Avec `edit`, il emprunte le SA du pod
+> Jupyter utilisé à l'installation — si ce pod est supprimé, le service MCP perd ses
+> droits cluster.
 
 Durée : ~10 min.
 
@@ -43,18 +48,39 @@ identifiants — vous n'en avez pas besoin, cliquez pour ouvrir). Dans JupyterLa
 
 ---
 
-## Étape 4 — Vérifier le rôle du pod (`edit`)
+## Étape 4 — Choisir le rôle du pod (`admin` recommandé, `edit` minimum)
 
-L'installation crée un Deployment → le pod doit avoir le rôle Kubernetes **`edit`**
-(choisi **au lancement du service** depuis le portail). Vérifiez dans le terminal :
+L'installation crée un Deployment → le pod doit avoir le rôle Kubernetes **`admin`** ou
+**`edit`** (choisi **au lancement du service** depuis le portail).
+
+| Rôle | ServiceAccount du service MCP | Robustesse |
+|---|---|---|
+| **`admin`** ✅ recommandé | SA dédié `mcp` créé par le chart | Stable — indépendant du pod lanceur |
+| `edit` | SA du pod Jupyter lanceur emprunté | ⚠ Fragile — si ce pod est supprimé, le service MCP perd ses droits cluster |
+
+Vérifiez le rôle effectif dans le terminal :
 
 ```bash
-kubectl auth can-i create deployment -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+# Minimum requis (edit ou admin) :
+kubectl auth can-i create deployments -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+# Admin disponible (recommandé) :
+kubectl auth can-i create rolebindings -n $(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 ```
 
-Si la réponse est **`no`**, votre pod est en `view` : relancez un service Jupyter/VSCode
-depuis le portail en réglant **Kubernetes → rôle = `edit`**. (Un pod lancé par le MCP a le
-rôle `view` par défaut.)
+Si la première commande retourne **`no`** : relancez le service Jupyter/VSCode depuis le
+portail en réglant **Kubernetes → rôle = `edit`** (minimum) ou **`admin`** (recommandé).
+Un pod lancé par le MCP lui-même a le rôle `view` par défaut — ne pas l'utiliser pour
+l'installation.
+
+> **Note Helm depuis Jupyter :** si vous exécutez des commandes `helm` directement
+> (hors `install.sh`), le répertoire de configuration par défaut n'est pas inscriptible.
+> Ajoutez avant la commande :
+> ```bash
+> export HELM_CONFIG_HOME=/tmp/helm-config HELM_CACHE_HOME=/tmp/helm-cache HELM_DATA_HOME=/tmp/helm-data
+> mkdir -p $HELM_CONFIG_HOME $HELM_CACHE_HOME $HELM_DATA_HOME
+> ```
+> `install.sh` gère cela automatiquement.
 
 ---
 

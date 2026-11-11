@@ -30,6 +30,15 @@
   refuse (`UNKNOWN_ARGUMENT`, avec suggestion) avant toute action ; un autre argument inconnu est
   ignore et liste dans `arguments_ignores`. Les arguments lus par `gpu_switch`, `project_bind` et
   `project_start` sans etre declares le sont maintenant.
+- **Persistance OAuth** : l'etat OAuth (clients DCR, consentements, jetons derives, sessions)
+  survit aux redemarrages du conteneur via un Secret Kubernetes `mcp-oauth` (meme patron que
+  `mcp-sessions`). `_ecrit()` declenche un flush en arriere-plan apres chaque mutation, meme
+  si le systeme de fichiers du conteneur est ephemere (pas de PVC). Au demarrage, repli sur le
+  Secret si les fichiers locaux sont absents. Prerequis a la rotation de `PASSERELLE_MCP_BEARER`.
+- **ServiceAccount dedie** : `install.sh` detecte automatiquement le role RBAC du pod lanceur.
+  Role admin → `rbac.create=true` : le chart cree son propre SA `mcp` + RoleBinding `edit`,
+  stable et independant du pod lanceur. Role edit → comportement conserve avec avertissement
+  visible. Docs `INSTALL-IN-CLUSTER.md` : tableau des roles, note Helm config dir.
 - **Reste a faire** : CORS restreint aux origines attendues, plafond du flux SSE.
 
 - **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture
