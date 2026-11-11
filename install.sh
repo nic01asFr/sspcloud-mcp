@@ -61,6 +61,15 @@ if ! kubectl auth can-i create deployments -n "$NS" >/dev/null 2>&1; then
   (Le rôle par défaut 'view' ne permet pas de créer le Deployment.)"
 fi
 
+# Détection du rôle admin : un pod admin peut créer un RoleBinding vers une
+# ClusterRole existante, ce qui permet au service MCP d'avoir son propre
+# ServiceAccount (stable, indépendant du pod lanceur).
+# Rôle edit : on réutilise le SA du pod courant — fragile si ce pod est supprimé.
+CAN_RBAC=false
+if kubectl auth can-i create rolebindings -n "$NS" >/dev/null 2>&1; then
+  CAN_RBAC=true
+fi
+
 SECRET_NAME="${RELEASE}"
 BEARER=$(kubectl get secret "$SECRET_NAME" -n "$NS" \
   -o jsonpath='{.data.PASSERELLE_MCP_BEARER}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
@@ -107,13 +116,22 @@ ARGS=(
   --set "app.host=$HOST"
   --set "onyxia_user=$USERNAME"
   --set "ingress.className=onyxia"
-  --set "rbac.create=false"
   --set-string "appAuth.token=$BEARER"
   --set "image.repository=${IMAGE_REPO:-$IMAGE_REPO_DEFAULT}"
   --set "image.tag=${IMAGE_TAG:-latest}"
   --set "image.pullPolicy=Always"
 )
-[[ -n "$SA" ]] && ARGS+=(--set "serviceAccount.name=$SA")
+
+if [[ "$CAN_RBAC" == "true" ]]; then
+  ok "Rôle admin détecté : ServiceAccount dédié '$RELEASE' + RoleBinding edit (stable)"
+  ARGS+=(--set "rbac.create=true")
+else
+  warn "Rôle edit (pas admin) : ServiceAccount '$SA' réutilisé depuis le pod lanceur."
+  warn "⚠ Si ce pod est supprimé, le service MCP perdra ses droits cluster."
+  warn "  Remède : relancer install.sh depuis un pod avec Kubernetes > rôle : admin"
+  ARGS+=(--set "rbac.create=false")
+  [[ -n "$SA" ]] && ARGS+=(--set "serviceAccount.name=$SA")
+fi
 [[ -n "${VERSION:-}" ]] && ARGS+=(--version "$VERSION")
 
 helm upgrade --install "$RELEASE" "$CHART_REF" "${ARGS[@]}" --wait --timeout 8m
