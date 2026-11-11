@@ -30,6 +30,15 @@
   refuse (`UNKNOWN_ARGUMENT`, avec suggestion) avant toute action ; un autre argument inconnu est
   ignore et liste dans `arguments_ignores`. Les arguments lus par `gpu_switch`, `project_bind` et
   `project_start` sans etre declares le sont maintenant.
+- **Mode shell** : `session_start(attach_pod=X, mode="shell")` ouvre une session de transport
+  `kubectl exec` sur n'importe quel pod, sans Jupyter ni port-forward (atelier, batch...).
+  `exec(lang="bash")` transite par `kubectl exec` ; `exec_python` lève `NO_KERNEL_IN_SHELL_MODE`.
+  Garde opt-in : `SHELL_MODE_ENABLED=true` requis côté serveur (désactivé par défaut).
+  Audit-log : premier mot + longueur de la commande uniquement (pas le contenu).
+  `NOT_A_JUPYTER_POD` hint enrichi pour suggérer `mode="shell"`. `mode` et `attach_pod` sont
+  validés (`INVALID_ARGUMENT`), le pod du service lui-même est refusé (`SHELL_SELF_FORBIDDEN`),
+  `read_file` / `write_file` fonctionnent en shell ; `pull_artifact` et `push_repo` (source
+  locale) restent réservés au mode jupyter. `write_file` en shell est plafonné à 64 000 octets (`FILE_TOO_LARGE`). Délai d appliqué dans le pod (`timeout -k 2`, sinon la commande survit à `EXEC_TIMEOUT`) ; sans `timeout` dans l image, aucune garde distante.
 - **Reste a faire** : CORS restreint aux origines attendues, plafond du flux SSE.
 
 - **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture

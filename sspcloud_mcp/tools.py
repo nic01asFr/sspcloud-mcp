@@ -19,8 +19,11 @@ from . import deploy_ops as D
 from . import gpu_broker as G
 from . import onyxia_registry as O
 from . import ops
-from .errors import MCPToolError
+from .errors import MCPToolError, shell_mode_disabled
 from .session import SYNC_BUDGET_S
+
+_SHELL_WRITE_MAX = 64_000   # base64 (+33 %) reste sous MAX_ARG_STRLEN (128 Kio)
+_SHELL_MODE_ENABLED =os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
 
 _NS_DEFAULT = os.getenv("SSPCLOUD_NAMESPACE", "")
 
@@ -45,10 +48,17 @@ def _ns(args: dict) -> str:
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def session_start(mgr, args: dict) -> dict:
+    mode = args.get("mode", "jupyter")
+    if mode not in ("jupyter", "shell"):
+        raise V.argument_invalide("mode", mode, "'jupyter' ou 'shell'.")
+    if mode == "shell" and not _SHELL_MODE_ENABLED:
+        raise shell_mode_disabled()
     project = V.nom_projet(args["project"]) if args.get("project") else ""
     sid = (args.get("session_id") or
            (f"proj-{project}" if project else f"dev-{uuid.uuid4().hex[:8]}"))
     attach = args.get("attach_pod") or ""
+    if mode == "shell":
+        attach = V.nom_k8s("attach_pod", attach)
     if (not attach and not args.get("public_url") and not args.get("launch_chart")
             and not project and not T.in_cluster()):
         attach = os.getenv("PASSERELLE_MCP_POD", "")
@@ -61,6 +71,7 @@ async def session_start(mgr, args: dict) -> dict:
         gpu=bool(args.get("gpu", False)),
         idle_minutes=int(args.get("idle_minutes", 30)),
         jupyter_password=args.get("jupyter_password", ""),
+        mode=mode,
     )
     if project:
         s.workdir = f"{s.workdir.rstrip('/')}/projects/{project}"
@@ -68,7 +79,7 @@ async def session_start(mgr, args: dict) -> dict:
         mgr._save()
     return {"session_id": s.id, "pod": s.pod, "namespace": s.namespace,
             "gpu": s.gpu, "base_url": s.base_url, "workdir": s.workdir,
-            "project": project or None}
+            "mode": s.mode, "project": project or None}
 
 
 async def session_status(mgr, args: dict) -> dict:
@@ -114,6 +125,23 @@ async def write_file(mgr, args: dict) -> dict:
     sid, path, content = args["session_id"], args["path"], args["content"]
     import base64
     b64 = base64.b64encode(content.encode()).decode()
+    if mgr.get(sid).mode == "shell":
+        import shlex
+        octets = len(content.encode())
+        if octets > _SHELL_WRITE_MAX:
+            raise MCPToolError(
+                "FILE_TOO_LARGE",
+                f"Contenu de {octets} octets : plafond {_SHELL_WRITE_MAX} en mode shell "
+                "(le contenu passe dans un seul argument de commande, limité à 128 Kio).",
+                "Écrivez en plusieurs fichiers, ou utilisez une session mode jupyter.")
+        q = shlex.quote(path)
+        r = await mgr.exec_bash(
+            sid, f"mkdir -p \"$(dirname {q})\" && echo {b64} | base64 -d > {q} "
+                 f"&& wc -c < {q}", timeout=60)
+        if r["rc"] != 0:
+            raise MCPToolError("WRITE_FAILED", r["stderr"].strip()[:200] or "écriture impossible",
+                               "Vérifiez le chemin et les permissions.")
+        return {"path": path, "bytes": int(r["stdout"].strip() or 0)}
     code = (
         "import base64, os\n"
         f"_p = {path!r}\n"
@@ -132,6 +160,14 @@ async def write_file(mgr, args: dict) -> dict:
 async def read_file(mgr, args: dict) -> dict:
     sid, path = args["session_id"], args["path"]
     maxb = int(args.get("max_bytes", 100_000))
+    if mgr.get(sid).mode == "shell":
+        import shlex
+        r = await mgr.exec_bash(
+            sid, f"head -c {maxb + 1} {shlex.quote(path)}", timeout=60)
+        if r["rc"] != 0:
+            raise MCPToolError("READ_FAILED", r["stderr"].strip()[:200] or path,
+                               "Vérifiez le chemin (list_files).")
+        return {"content": r["stdout"][:maxb], "truncated": len(r["stdout"]) > maxb}
     code = (
         "import os\n"
         f"_p = {path!r}\n"
@@ -530,11 +566,16 @@ TOOLS: dict = {
     "session_start": (session_start,
         "Ouvre une session de dev distante sur SSPCloud : attache un pod existant "
         "(attach_pod) OU se connecte via URL publique (public_url+token) OU lance un "
-        "pod (launch_chart, gpu). Retourne un session_id réutilisable.",
+        "pod (launch_chart, gpu). mode='shell' : transport kubectl exec (sans Jupyter, "
+        "nécessite SHELL_MODE_ENABLED=true côté serveur). Retourne un session_id réutilisable.",
         _s({"namespace": _STR, "session_id": _STR, "project": _STR,
             "attach_pod": _STR, "public_url": _STR, "token": _STR,
             "launch_chart": _STR, "gpu": _BOOL, "idle_minutes": _INT,
-            "jupyter_password": _STR}, [])),
+            "jupyter_password": _STR,
+            "mode": {"type": "string", "enum": ["jupyter", "shell"],
+                     "description": "Transport : 'jupyter' (kernel stateful, défaut) "
+                                    "ou 'shell' (kubectl exec, sans Jupyter)."}},
+           [])),
 
     "session_status": (session_status,
         "État d'une session (pod, GPU, kernel, uptime). Sans session_id : liste "
