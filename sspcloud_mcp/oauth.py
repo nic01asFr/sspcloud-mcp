@@ -33,6 +33,8 @@ import urllib.parse
 from http.cookies import SimpleCookie
 from pathlib import Path
 
+from . import transports as T
+
 _pending_codes: dict[str, dict] = {}
 _clients: dict[str, dict] = {}
 _grants: dict[str, float] = {}          # "client_id|redirect_uri" -> horodatage
@@ -45,6 +47,9 @@ _CLIENTS_FILE = _DATA_DIR / "clients.json"
 _GRANTS_FILE = _DATA_DIR / "grants.json"
 _TOKENS_FILE = _DATA_DIR / "tokens.json"
 _SESSIONS_FILE = _DATA_DIR / "sessions.json"
+
+_OAUTH_SECRET = os.getenv("MCP_OAUTH_SECRET", "mcp-oauth")
+_secret_lock = threading.Lock()
 
 _PREFIXE_JETON = "pmcp_"
 _TTL_JETON_S = 90 * 24 * 3600
@@ -92,7 +97,7 @@ def _charge(fichier: Path, defaut):
 
 
 def _ecrit(fichier: Path, donnees) -> None:
-    """Ecriture atomique : un remplacement, jamais un fichier a moitie ecrit."""
+    """Ecriture atomique + declenchement de la sauvegarde K8s en arriere-plan."""
     try:
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         temporaire = fichier.with_suffix(fichier.suffix + ".tmp")
@@ -101,8 +106,66 @@ def _ecrit(fichier: Path, donnees) -> None:
     except Exception as exc:  # noqa: BLE001
         # Sans cela, jetons et consentements ne vivraient qu'en memoire et
         # disparaitraient au redemarrage, sans une ligne pour l'expliquer.
-        log.warning("ecriture de %s impossible (%s : %s) : cet etat ne survivra pas "
-                    "au redemarrage", fichier.name, type(exc).__name__, exc)
+        log.warning("ecriture de %s impossible (%s : %s) : etat pas persiste sur disque",
+                    fichier.name, type(exc).__name__, exc)
+    # Toujours tenter la sauvegarde dans le Secret K8s : resilient aux redemarrages
+    # meme si le systeme de fichiers du conteneur est ephemere.
+    threading.Thread(target=_sauvegarder_dans_secret, daemon=True).start()
+
+
+def _sauvegarder_dans_secret() -> None:
+    """Persiste l'etat OAuth complet dans le Secret K8s (thread d'arriere-plan).
+
+    Meme schema que session.py pour mcp-sessions : create --dry-run | apply.
+    Une seule cle 'oauth.json' contient les 4 dicts pour eviter les ecrasements
+    partiels dus a des ecritures concurrentes de cles distinctes.
+    """
+    if not T.in_cluster():
+        return
+    ns = os.getenv("SSPCLOUD_NAMESPACE", "")
+    contenu = json.dumps({
+        "clients": _clients,
+        "grants": _grants,
+        "tokens": _tokens,
+        "sessions": _sessions,
+    })
+    try:
+        with _secret_lock:
+            rc, yml, _ = T.kubectl(
+                "create", "secret", "generic", _OAUTH_SECRET,
+                f"--from-literal=oauth.json={contenu}",
+                "--dry-run=client", "-o", "yaml",
+                namespace=ns or None, timeout=20)
+            if rc == 0 and yml.strip():
+                T.kubectl("apply", "-f", "-", namespace=ns or None,
+                          timeout=20, input_text=yml)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _recharge_depuis_secret() -> None:
+    """Charge l'etat OAuth depuis le Secret K8s si les fichiers locaux sont absents.
+
+    Appele uniquement in_cluster, apres que _recharge_tout a trouve tous les dicts vides.
+    """
+    ns = os.getenv("SSPCLOUD_NAMESPACE", "")
+    try:
+        rc, out, _ = T.kubectl(
+            "get", "secret", _OAUTH_SECRET, "-o",
+            r"jsonpath={.data.oauth\.json}",
+            namespace=ns or None, timeout=15)
+        if rc != 0 or not out.strip():
+            return
+        blob = json.loads(base64.b64decode(out.strip()).decode())
+    except Exception:  # noqa: BLE001
+        return
+    global _clients, _grants, _tokens, _sessions
+    _clients = blob.get("clients") or {}
+    _grants = blob.get("grants") or {}
+    _tokens = blob.get("tokens") or {}
+    _sessions = blob.get("sessions") or {}
+    log.info("etat OAuth restaure depuis le Secret '%s' (%d clients, %d jetons)",
+             _OAUTH_SECRET, len(_clients), len(_tokens))
 
 
 def _recharge_tout() -> None:
@@ -111,6 +174,10 @@ def _recharge_tout() -> None:
     _grants = _charge(_GRANTS_FILE, {}) or {}
     _tokens = _charge(_TOKENS_FILE, {}) or {}
     _sessions = _charge(_SESSIONS_FILE, {}) or {}
+    # Repli sur le Secret K8s si les fichiers locaux sont tous absents/vides :
+    # cas normal d'un conteneur apres un redemarrage sans volume persistant.
+    if T.in_cluster() and not any([_clients, _grants, _tokens, _sessions]):
+        _recharge_depuis_secret()
 
 
 _recharge_tout()

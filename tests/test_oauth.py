@@ -432,4 +432,4 @@ def test_ecriture_impossible_est_journalisee(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(oauth, "_DATA_DIR", fichier_bloquant / "sous")
     with caplog.at_level("WARNING", logger="sspcloud_mcp.oauth"):
         oauth._ecrit(fichier_bloquant / "sous" / "clients.json", {"a": 1})
-    assert "ne survivra pas" in caplog.text
+    assert "etat pas persiste sur disque" in caplog.text
