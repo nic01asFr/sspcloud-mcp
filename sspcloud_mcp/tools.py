@@ -19,8 +19,10 @@ from . import deploy_ops as D
 from . import gpu_broker as G
 from . import onyxia_registry as O
 from . import ops
-from .errors import MCPToolError
+from .errors import MCPToolError, shell_mode_disabled
 from .session import SYNC_BUDGET_S
+
+_SHELL_MODE_ENABLED = os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
 
 _NS_DEFAULT = os.getenv("SSPCLOUD_NAMESPACE", "")
 
@@ -45,6 +47,9 @@ def _ns(args: dict) -> str:
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def session_start(mgr, args: dict) -> dict:
+    mode = args.get("mode", "jupyter")
+    if mode == "shell" and not _SHELL_MODE_ENABLED:
+        raise shell_mode_disabled()
     project = V.nom_projet(args["project"]) if args.get("project") else ""
     sid = (args.get("session_id") or
            (f"proj-{project}" if project else f"dev-{uuid.uuid4().hex[:8]}"))
@@ -61,6 +66,7 @@ async def session_start(mgr, args: dict) -> dict:
         gpu=bool(args.get("gpu", False)),
         idle_minutes=int(args.get("idle_minutes", 30)),
         jupyter_password=args.get("jupyter_password", ""),
+        mode=mode,
     )
     if project:
         s.workdir = f"{s.workdir.rstrip('/')}/projects/{project}"
@@ -68,7 +74,7 @@ async def session_start(mgr, args: dict) -> dict:
         mgr._save()
     return {"session_id": s.id, "pod": s.pod, "namespace": s.namespace,
             "gpu": s.gpu, "base_url": s.base_url, "workdir": s.workdir,
-            "project": project or None}
+            "mode": s.mode, "project": project or None}
 
 
 async def session_status(mgr, args: dict) -> dict:
@@ -530,11 +536,16 @@ TOOLS: dict = {
     "session_start": (session_start,
         "Ouvre une session de dev distante sur SSPCloud : attache un pod existant "
         "(attach_pod) OU se connecte via URL publique (public_url+token) OU lance un "
-        "pod (launch_chart, gpu). Retourne un session_id réutilisable.",
+        "pod (launch_chart, gpu). mode='shell' : transport kubectl exec (sans Jupyter, "
+        "nécessite SHELL_MODE_ENABLED=true côté serveur). Retourne un session_id réutilisable.",
         _s({"namespace": _STR, "session_id": _STR, "project": _STR,
             "attach_pod": _STR, "public_url": _STR, "token": _STR,
             "launch_chart": _STR, "gpu": _BOOL, "idle_minutes": _INT,
-            "jupyter_password": _STR}, [])),
+            "jupyter_password": _STR,
+            "mode": {"type": "string", "enum": ["jupyter", "shell"],
+                     "description": "Transport : 'jupyter' (kernel stateful, défaut) "
+                                    "ou 'shell' (kubectl exec, sans Jupyter)."}},
+           [])),
 
     "session_status": (session_status,
         "État d'une session (pod, GPU, kernel, uptime). Sans session_id : liste "

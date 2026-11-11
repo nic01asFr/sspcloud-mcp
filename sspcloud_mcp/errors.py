@@ -107,10 +107,28 @@ def not_a_jupyter_pod(pod: str, namespace: str = "") -> MCPToolError:
         "list_files, job_poll et push_repo n'y fonctionnent pas.",
         "Pour le lire sans noyau : workload_status, workload_logs ou workload_events "
         f"(target='{cible}'). Pour exécuter du code, session_start sur un pod jupyter-* "
-        "(list_pods indique les pods du namespace).",
+        "(list_pods indique les pods du namespace). Pour un shell seul (si SHELL_MODE_ENABLED "
+        "est actif) : session_start(attach_pod=..., mode='shell').",
         extra={"suggested_tools": ["workload_status", "workload_logs", "workload_events"],
                "target": cible,
                **({"namespace": namespace} if namespace else {})},
+    )
+
+
+def no_kernel_in_shell_mode(session_id: str) -> MCPToolError:
+    return MCPToolError(
+        "NO_KERNEL_IN_SHELL_MODE",
+        f"Session {session_id!r} en mode shell : exec_python n'est pas disponible.",
+        "Utilisez exec(lang='bash', ...) ou exec(code='...', background=true).",
+    )
+
+
+def shell_mode_disabled() -> MCPToolError:
+    return MCPToolError(
+        "SHELL_MODE_DISABLED",
+        "Le mode shell est désactivé sur ce serveur.",
+        "Définissez SHELL_MODE_ENABLED=true dans l'environnement du pod MCP "
+        "pour l'activer (opt-in explicite requis).",
     )
 
 

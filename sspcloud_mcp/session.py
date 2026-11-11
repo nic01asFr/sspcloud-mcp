@@ -31,7 +31,8 @@ from . import onyxia_registry as O
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
 from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
-                     kernel_start_timeout, not_a_jupyter_pod)
+                     kernel_start_timeout, not_a_jupyter_pod,
+                     no_kernel_in_shell_mode)
 
 _REGISTRY = Path.home() / ".passerelle" / "mcp_sessions.json"
 _REGISTRY_SECRET = "mcp-sessions"
@@ -91,6 +92,7 @@ class DevSession:
     created_at: float = 0.0
     last_active: float = 0.0
     idle_minutes: int = 30
+    mode: str = "jupyter"         # "jupyter" ou "shell" (kubectl exec, sans Jupyter)
     # transient (non sérialisé)
     _pf: object = field(default=None, repr=False, compare=False)
     _kernel: KernelClient | None = field(default=None, repr=False, compare=False)
@@ -105,7 +107,7 @@ class DevSession:
                 "base_url": self.base_url, "token": self.token, "gpu": self.gpu,
                 "workdir": self.workdir, "repo_path": self.repo_path,
                 "created_at": self.created_at, "last_active": self.last_active,
-                "idle_minutes": self.idle_minutes}
+                "idle_minutes": self.idle_minutes, "mode": self.mode}
 
 
 # ── Gestionnaire ──────────────────────────────────────────────────────────────
@@ -162,16 +164,32 @@ class SessionManager:
     async def start(self, *, namespace: str, session_id: str,
                     attach_pod: str = "", public_url: str = "", token: str = "",
                     launch_chart: str = "", gpu: bool = False,
-                    idle_minutes: int = 30, jupyter_password: str = "") -> DevSession:
+                    idle_minutes: int = 30, jupyter_password: str = "",
+                    mode: str = "jupyter") -> DevSession:
         """Crée une session en résolvant le transport le plus approprié.
 
         Priorité : public_url (users stsonly) > attach_pod (admin) > launch (admin).
+        mode="shell" : kubectl exec direct, sans Jupyter (opt-in SHELL_MODE_ENABLED).
         """
         now = time.time()
         s = DevSession(id=session_id, namespace=namespace, gpu=gpu,
-                       idle_minutes=idle_minutes, created_at=now, last_active=now)
+                       idle_minutes=idle_minutes, created_at=now, last_active=now,
+                       mode=mode)
 
-        if public_url:
+        if mode == "shell":
+            # Mode shell : transport kubectl exec uniquement. Pas de Jupyter,
+            # pas de port-forward, pas de vérification du kernel. attach_pod requis.
+            pod = attach_pod
+            if not pod:
+                raise pod_unreachable("?", "attach_pod requis en mode shell.")
+            if not T.pod_running(pod, namespace):
+                raise pod_unreachable(pod, "Pod non Running.")
+            s.pod = pod
+            s.base_url = ""
+            self._sessions[session_id] = s
+            self._save()
+            return s
+        elif public_url:
             # Transport public (Onyxia) — sans kubectl.
             s.base_url = public_url.rstrip("/")
             s.token = token
@@ -341,15 +359,16 @@ class SessionManager:
     async def stop(self, session_id: str, *, uninstall: bool = False) -> dict:
         s = self.get(session_id)
         released = {"kernel": False, "port_forward": False, "helm": False}
-        if s._kernel is not None:
-            try:
-                await s._kernel.close()
-            except Exception:
-                pass
-            released["kernel"] = True
-        if s._pf is not None:
-            s._pf.stop()
-            released["port_forward"] = True
+        if s.mode != "shell":
+            if s._kernel is not None:
+                try:
+                    await s._kernel.close()
+                except Exception:
+                    pass
+                released["kernel"] = True
+            if s._pf is not None:
+                s._pf.stop()
+                released["port_forward"] = True
         if uninstall and s.pod:
             import subprocess
             from ._helm import find_helm, helm_env
@@ -421,6 +440,8 @@ class SessionManager:
     async def exec_python(self, session_id: str, code: str,
                           timeout: float = SYNC_BUDGET_S) -> ExecResult:
         s = self.get(session_id)
+        if s.mode == "shell":
+            raise no_kernel_in_shell_mode(session_id)
         s.touch()
         budget = min(timeout, SYNC_BUDGET_S)
         async with self._kernel_slot(s, budget) as (kc, remaining):
@@ -432,13 +453,15 @@ class SessionManager:
 
     async def exec_bash(self, session_id: str, command: str,
                         timeout: float = SYNC_BUDGET_S) -> dict:
-        """Exécute une commande shell À TRAVERS le kernel (subprocess).
+        """Exécute une commande shell.
 
-        Fonctionne quel que soit le transport, sans kubectl. Retourne
-        {rc, stdout, stderr}.
+        Mode jupyter : via le kernel Python (subprocess). Mode shell : kubectl exec.
+        Retourne {rc, stdout, stderr}.
         """
         s = self.get(session_id)
         s.touch()
+        if s.mode == "shell":
+            return await self._exec_bash_shell(s, command, min(timeout, SYNC_BUDGET_S))
         # Le dossier projet n'existe pas sur un pod frais : le créer (sinon
         # subprocess échoue avant d'exécuter la commande), repli sur le cwd.
         wrap = (
@@ -469,6 +492,28 @@ class SessionManager:
         return {"rc": -1, "stdout": res.stdout,
                 "stderr": res.stderr or (res.error or {}).get("evalue", "")}
 
+    async def _exec_bash_shell(self, s: DevSession, command: str,
+                               budget: float) -> dict:
+        """Exécute une commande via kubectl exec (mode shell)."""
+        import logging
+        _log = logging.getLogger(__name__)
+        # Audit : premier mot + longueur seulement (jamais le contenu — secrets possibles).
+        first_word = command.split()[0] if command.split() else ""
+        _log.info("shell-exec pod=%s cmd=%s len=%d", s.pod, first_word, len(command))
+        loop = asyncio.get_running_loop()
+
+        def _run() -> dict:
+            rc, stdout, stderr = T.kubectl(
+                "exec", s.pod, "--", "sh", "-c", command,
+                namespace=s.namespace, timeout=int(budget))
+            return {"rc": rc, "stdout": stdout, "stderr": stderr}
+
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, _run), timeout=budget)
+        except asyncio.TimeoutError:
+            raise exec_timeout(budget)
+
     # ── Traitements longs (tâche de fond) ──────────────────────────────────────
 
     async def exec_background(self, session_id: str, code: str,
@@ -478,6 +523,7 @@ class SessionManager:
         Le kernel reste libre ; suivre l'avancement avec poll_job(). Idéal pour
         un entraînement / traitement de plusieurs minutes (pensez à écrire les
         checkpoints sur volume persistant / S3, le pod pouvant être suspendu).
+        Mode shell : python refusé (pas de kernel pour écrire le script).
         """
         import uuid as _uuid, base64, shlex
         s = self.get(session_id)
@@ -486,6 +532,8 @@ class SessionManager:
         if lang == "bash":
             target = code
         else:
+            if s.mode == "shell":
+                raise no_kernel_in_shell_mode(session_id)
             b64 = base64.b64encode(code.encode()).decode()
             await self.exec_python(
                 session_id,
