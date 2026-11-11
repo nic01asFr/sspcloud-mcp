@@ -196,3 +196,26 @@ def test_read_file_shell(monkeypatch):
     mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
     r = _run(tools.read_file(mgr, {"session_id": "s", "path": "/etc/hostname"}))
     assert r == {"content": "abc", "truncated": False}
+
+
+def test_write_file_shell_trop_gros(monkeypatch):
+    appels = []
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: appels.append(a) or (0, "0", ""))
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._save = lambda: None
+    mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
+    with pytest.raises(MCPToolError) as exc:
+        _run(tools.write_file(mgr, {"session_id": "s", "path": "/tmp/x",
+                                    "content": "a" * (tools._SHELL_WRITE_MAX + 1)}))
+    assert exc.value.code == "FILE_TOO_LARGE"
+    assert appels == []
+
+
+def test_write_file_shell_a_la_limite(monkeypatch):
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: (0, "64000\n", ""))
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._save = lambda: None
+    mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
+    r = _run(tools.write_file(mgr, {"session_id": "s", "path": "/tmp/x",
+                                    "content": "a" * tools._SHELL_WRITE_MAX}))
+    assert r["bytes"] == tools._SHELL_WRITE_MAX

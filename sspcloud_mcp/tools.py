@@ -22,7 +22,8 @@ from . import ops
 from .errors import MCPToolError, shell_mode_disabled
 from .session import SYNC_BUDGET_S
 
-_SHELL_MODE_ENABLED = os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
+_SHELL_WRITE_MAX = 64_000   # base64 (+33 %) reste sous MAX_ARG_STRLEN (128 Kio)
+_SHELL_MODE_ENABLED =os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
 
 _NS_DEFAULT = os.getenv("SSPCLOUD_NAMESPACE", "")
 
@@ -126,6 +127,13 @@ async def write_file(mgr, args: dict) -> dict:
     b64 = base64.b64encode(content.encode()).decode()
     if mgr.get(sid).mode == "shell":
         import shlex
+        octets = len(content.encode())
+        if octets > _SHELL_WRITE_MAX:
+            raise MCPToolError(
+                "FILE_TOO_LARGE",
+                f"Contenu de {octets} octets : plafond {_SHELL_WRITE_MAX} en mode shell "
+                "(le contenu passe dans un seul argument de commande, limité à 128 Kio).",
+                "Écrivez en plusieurs fichiers, ou utilisez une session mode jupyter.")
         q = shlex.quote(path)
         r = await mgr.exec_bash(
             sid, f"mkdir -p \"$(dirname {q})\" && echo {b64} | base64 -d > {q} "
