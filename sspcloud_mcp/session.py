@@ -30,7 +30,7 @@ from pathlib import Path
 from . import onyxia_registry as O
 from . import transports as T
 from .kernel_client import KernelClient, ExecResult
-from .errors import (no_session, pod_unreachable, exec_timeout, session_busy,
+from .errors import (MCPToolError, no_session, pod_unreachable, exec_timeout, session_busy,
                      kernel_start_timeout, not_a_jupyter_pod,
                      no_kernel_in_shell_mode)
 
@@ -182,6 +182,12 @@ class SessionManager:
             pod = attach_pod
             if not pod:
                 raise pod_unreachable("?", "attach_pod requis en mode shell.")
+            if pod == os.getenv("HOSTNAME", ""):
+                # Un shell dans le pod du service exposerait sa clé maître et son jeton SA.
+                raise MCPToolError(
+                    "SHELL_SELF_FORBIDDEN",
+                    "Le mode shell est refusé sur le pod du service MCP lui-même.",
+                    "Choisissez un autre pod du namespace (list_pods).")
             if not T.pod_running(pod, namespace):
                 raise pod_unreachable(pod, "Pod non Running.")
             s.pod = pod

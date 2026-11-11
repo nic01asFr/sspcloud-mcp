@@ -48,12 +48,16 @@ def _ns(args: dict) -> str:
 
 async def session_start(mgr, args: dict) -> dict:
     mode = args.get("mode", "jupyter")
+    if mode not in ("jupyter", "shell"):
+        raise V.argument_invalide("mode", mode, "'jupyter' ou 'shell'.")
     if mode == "shell" and not _SHELL_MODE_ENABLED:
         raise shell_mode_disabled()
     project = V.nom_projet(args["project"]) if args.get("project") else ""
     sid = (args.get("session_id") or
            (f"proj-{project}" if project else f"dev-{uuid.uuid4().hex[:8]}"))
     attach = args.get("attach_pod") or ""
+    if mode == "shell":
+        attach = V.nom_k8s("attach_pod", attach)
     if (not attach and not args.get("public_url") and not args.get("launch_chart")
             and not project and not T.in_cluster()):
         attach = os.getenv("PASSERELLE_MCP_POD", "")
@@ -120,6 +124,16 @@ async def write_file(mgr, args: dict) -> dict:
     sid, path, content = args["session_id"], args["path"], args["content"]
     import base64
     b64 = base64.b64encode(content.encode()).decode()
+    if mgr.get(sid).mode == "shell":
+        import shlex
+        q = shlex.quote(path)
+        r = await mgr.exec_bash(
+            sid, f"mkdir -p \"$(dirname {q})\" && echo {b64} | base64 -d > {q} "
+                 f"&& wc -c < {q}", timeout=60)
+        if r["rc"] != 0:
+            raise MCPToolError("WRITE_FAILED", r["stderr"].strip()[:200] or "écriture impossible",
+                               "Vérifiez le chemin et les permissions.")
+        return {"path": path, "bytes": int(r["stdout"].strip() or 0)}
     code = (
         "import base64, os\n"
         f"_p = {path!r}\n"
@@ -138,6 +152,14 @@ async def write_file(mgr, args: dict) -> dict:
 async def read_file(mgr, args: dict) -> dict:
     sid, path = args["session_id"], args["path"]
     maxb = int(args.get("max_bytes", 100_000))
+    if mgr.get(sid).mode == "shell":
+        import shlex
+        r = await mgr.exec_bash(
+            sid, f"head -c {maxb + 1} {shlex.quote(path)}", timeout=60)
+        if r["rc"] != 0:
+            raise MCPToolError("READ_FAILED", r["stderr"].strip()[:200] or path,
+                               "Vérifiez le chemin (list_files).")
+        return {"content": r["stdout"][:maxb], "truncated": len(r["stdout"]) > maxb}
     code = (
         "import os\n"
         f"_p = {path!r}\n"

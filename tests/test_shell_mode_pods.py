@@ -138,3 +138,61 @@ def test_shell_mode_enabled_autorise(monkeypatch):
         "namespace": "ns",
     }))
     assert result["mode"] == "shell"
+
+
+# ── 6. Entrées hostiles ───────────────────────────────────────────────────────
+
+def test_mode_inconnu_refuse(monkeypatch):
+    monkeypatch.setenv("SSPCLOUD_NAMESPACE", "ns")
+    mgr = _FakeMgr(DevSession(id="x"))
+    with pytest.raises(MCPToolError) as exc:
+        _run(tools.session_start(mgr, {"mode": "shel", "attach_pod": "a", "namespace": "ns"}))
+    assert exc.value.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.parametrize("pod", ["--all-namespaces", "-n", "a b", "A;rm", ""])
+def test_nom_de_pod_hostile_refuse_en_shell(monkeypatch, pod):
+    monkeypatch.setattr(tools, "_SHELL_MODE_ENABLED", True)
+    monkeypatch.setenv("SSPCLOUD_NAMESPACE", "ns")
+    mgr = _FakeMgr(DevSession(id="x"))
+    with pytest.raises(MCPToolError) as exc:
+        _run(tools.session_start(mgr, {"mode": "shell", "attach_pod": pod, "namespace": "ns"}))
+    assert exc.value.code == "INVALID_ARGUMENT"
+
+
+def test_shell_refuse_sur_le_pod_du_service(monkeypatch):
+    monkeypatch.setenv("HOSTNAME", "mcp-abc")
+    monkeypatch.setattr(T, "pod_running", lambda pod, ns: True)
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._sessions = {}
+    mgr._save = lambda: None
+    with pytest.raises(MCPToolError) as exc:
+        _run(mgr.start(namespace="ns", session_id="s", attach_pod="mcp-abc", mode="shell"))
+    assert exc.value.code == "SHELL_SELF_FORBIDDEN"
+
+
+# ── 7. Fichiers en mode shell ─────────────────────────────────────────────────
+
+def test_write_file_shell_quote_le_chemin(monkeypatch):
+    appels = []
+
+    def faux_kubectl(*args, namespace=None, timeout=20, input_text=None):
+        appels.append(args)
+        return 0, "5\n", ""
+
+    monkeypatch.setattr(T, "kubectl", faux_kubectl)
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._save = lambda: None
+    mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
+    r = _run(tools.write_file(mgr, {"session_id": "s", "path": "/tmp/x; rm -rf /", "content": "hello"}))
+    assert r["bytes"] == 5
+    assert "'/tmp/x; rm -rf /'" in appels[0][-1]
+
+
+def test_read_file_shell(monkeypatch):
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: (0, "abc", ""))
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._save = lambda: None
+    mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
+    r = _run(tools.read_file(mgr, {"session_id": "s", "path": "/etc/hostname"}))
+    assert r == {"content": "abc", "truncated": False}

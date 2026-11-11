@@ -35,7 +35,10 @@
   `exec(lang="bash")` transite par `kubectl exec` ; `exec_python` lève `NO_KERNEL_IN_SHELL_MODE`.
   Garde opt-in : `SHELL_MODE_ENABLED=true` requis côté serveur (désactivé par défaut).
   Audit-log : premier mot + longueur de la commande uniquement (pas le contenu).
-  `NOT_A_JUPYTER_POD` hint enrichi pour suggérer `mode="shell"`.
+  `NOT_A_JUPYTER_POD` hint enrichi pour suggérer `mode="shell"`. `mode` et `attach_pod` sont
+  validés (`INVALID_ARGUMENT`), le pod du service lui-même est refusé (`SHELL_SELF_FORBIDDEN`),
+  `read_file` / `write_file` fonctionnent en shell ; `pull_artifact` et `push_repo` (source
+  locale) restent réservés au mode jupyter.
 - **Reste a faire** : CORS restreint aux origines attendues, plafond du flux SSE.
 
 - **Exploitation** (31 outils) : `workload_status`, `workload_logs`, `workload_events` (lecture

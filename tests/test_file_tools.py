@@ -15,6 +15,7 @@ class LocalMgr:
 
     def __init__(self, workdir):
         self.workdir = str(workdir)
+        self.mode = "jupyter"
 
     def get(self, sid):
         return self
