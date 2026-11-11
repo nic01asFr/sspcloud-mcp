@@ -22,6 +22,7 @@ import base64
 import contextlib
 import json
 import os
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -507,18 +508,29 @@ class SessionManager:
         first_word = command.split()[0] if command.split() else ""
         _log.info("shell-exec pod=%s cmd=%s len=%d", s.pod, first_word, len(command))
         loop = asyncio.get_running_loop()
+        limit = max(int(budget), 1)
+        # Le délai est appliqué DANS le pod (timeout -k) : abandonner kubectl côté
+        # client laisserait la commande tourner et empilerait des processus. Le
+        # délai local, plus long, ne sert que de filet si kubectl lui-même se fige.
+        # Sans `timeout` dans l'image, la commande est lancée sans garde distante.
+        script = ('if command -v timeout >/dev/null 2>&1; then '
+                  f'exec timeout -k 2 {limit} sh -c "$1"; '
+                  'else exec sh -c "$1"; fi')
 
-        def _run() -> dict:
+        def _run() -> tuple[dict, float]:
+            t0 = time.monotonic()
             rc, stdout, stderr = T.kubectl(
-                "exec", s.pod, "--", "sh", "-c", command,
-                namespace=s.namespace, timeout=int(budget))
-            return {"rc": rc, "stdout": stdout, "stderr": stderr}
+                "exec", s.pod, "--", "sh", "-c", script, "sh", command,
+                namespace=s.namespace, timeout=limit + 8)
+            return {"rc": rc, "stdout": stdout, "stderr": stderr}, time.monotonic() - t0
 
         try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _run), timeout=budget)
-        except asyncio.TimeoutError:
+            res, elapsed = await loop.run_in_executor(None, _run)
+        except subprocess.TimeoutExpired:
+            raise exec_timeout(budget) from None
+        if res["rc"] in (124, 137) and elapsed >= limit - 1:
             raise exec_timeout(budget)
+        return res
 
     # ── Traitements longs (tâche de fond) ──────────────────────────────────────
 

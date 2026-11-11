@@ -219,3 +219,53 @@ def test_write_file_shell_a_la_limite(monkeypatch):
     r = _run(tools.write_file(mgr, {"session_id": "s", "path": "/tmp/x",
                                     "content": "a" * tools._SHELL_WRITE_MAX}))
     assert r["bytes"] == tools._SHELL_WRITE_MAX
+
+
+# ── 8. Délais : la commande doit mourir dans le pod ──────────────────────────
+
+def _mgr_shell():
+    mgr = SessionManager.__new__(SessionManager)
+    mgr._save = lambda: None
+    mgr._sessions = {"s": DevSession(id="s", namespace="ns", pod="atelier-0", mode="shell")}
+    return mgr
+
+
+def test_shell_pose_un_timeout_dans_le_pod(monkeypatch):
+    appels = []
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: appels.append((a, k)) or (0, "", ""))
+    _run(_mgr_shell().exec_bash("s", "sleep 999", timeout=30))
+    args, kw = appels[0]
+    assert "timeout -k 2 30" in args[args.index("-c") + 1]
+    assert args[-1] == "sleep 999"        # commande passée en argument, jamais interpolée
+    assert kw["timeout"] > 30             # le filet local est plus long que le garde distant
+
+
+def test_shell_timeout_du_pod_donne_exec_timeout(monkeypatch):
+    import time as _t
+
+    def lent(*a, **k):
+        _t.sleep(1.1)
+        return 124, "", ""
+
+    monkeypatch.setattr(T, "kubectl", lent)
+    with pytest.raises(MCPToolError) as exc:
+        _run(_mgr_shell()._exec_bash_shell(_mgr_shell()._sessions["s"], "sleep 999", 1))
+    assert exc.value.code == "EXEC_TIMEOUT"
+
+
+def test_shell_rc_124_rapide_n_est_pas_un_timeout(monkeypatch):
+    monkeypatch.setattr(T, "kubectl", lambda *a, **k: (124, "", "exit 124 voulu"))
+    r = _run(_mgr_shell().exec_bash("s", "exit 124", timeout=30))
+    assert r["rc"] == 124
+
+
+def test_shell_kubectl_fige_donne_exec_timeout(monkeypatch):
+    import subprocess
+
+    def fige(*a, **k):
+        raise subprocess.TimeoutExpired("kubectl", 5)
+
+    monkeypatch.setattr(T, "kubectl", fige)
+    with pytest.raises(MCPToolError) as exc:
+        _run(_mgr_shell().exec_bash("s", "x", timeout=5))
+    assert exc.value.code == "EXEC_TIMEOUT"
