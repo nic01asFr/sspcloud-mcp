@@ -49,6 +49,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "sspcloud-mcp.fullname" . }}
                   key: PASSERELLE_MCP_BEARER
+            {{- if .Values.shellMode.enabled }}
+            - name: SHELL_MODE_ENABLED
+              value: "true"
+            - name: SHELL_MODE_PODS
+              value: {{ join "," .Values.shellMode.pods | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if .Values.probes.readiness.enabled }}

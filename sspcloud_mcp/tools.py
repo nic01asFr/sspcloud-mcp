@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 import uuid
 
@@ -19,11 +20,15 @@ from . import deploy_ops as D
 from . import gpu_broker as G
 from . import onyxia_registry as O
 from . import ops
-from .errors import MCPToolError, shell_mode_disabled
+from .errors import MCPToolError, shell_mode_disabled, shell_pod_not_allowed
 from .session import SYNC_BUDGET_S
 
 _SHELL_WRITE_MAX = 64_000   # base64 (+33 %) reste sous MAX_ARG_STRLEN (128 Kio)
-_SHELL_MODE_ENABLED =os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
+_SHELL_MODE_ENABLED = os.getenv("SHELL_MODE_ENABLED", "").lower() in ("1", "true", "yes")
+# Liste blanche des pods ouvrables en mode shell (noms exacts, séparés par des
+# virgules ou des espaces). Vide = aucun : l'activation sans liste ne donne accès à rien.
+_SHELL_MODE_PODS = frozenset(
+    p for p in re.split(r"[,\s]+", os.getenv("SHELL_MODE_PODS", "")) if p)
 
 _NS_DEFAULT = os.getenv("SSPCLOUD_NAMESPACE", "")
 
@@ -59,6 +64,8 @@ async def session_start(mgr, args: dict) -> dict:
     attach = args.get("attach_pod") or ""
     if mode == "shell":
         attach = V.nom_k8s("attach_pod", attach)
+        if attach not in _SHELL_MODE_PODS:
+            raise shell_pod_not_allowed(attach, sorted(_SHELL_MODE_PODS))
     if (not attach and not args.get("public_url") and not args.get("launch_chart")
             and not project and not T.in_cluster()):
         attach = os.getenv("PASSERELLE_MCP_POD", "")

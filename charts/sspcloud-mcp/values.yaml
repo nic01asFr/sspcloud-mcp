@@ -77,6 +77,16 @@ service:
   type: ClusterIP
   port: 8000
 
+# --- Mode shell (kubectl exec, sans Jupyter) -----------------------------------
+# Désactivé par défaut. Pour ouvrir un shell dans un pod qui n'est pas Jupyter
+# (l'Atelier, par exemple), activer ET nommer les pods : une activation sans
+# liste n'autorise rien. Réglage du chart, donc conservé par `helm upgrade`
+# (un `kubectl set env` à la main serait écrasé).
+#   --set shellMode.enabled=true --set 'shellMode.pods={atelier-0}'
+shellMode:
+  enabled: false
+  pods: []
+
 # --- Ingress (classe onyxia = TLS auto via le wildcard *.user.lab.sspcloud.fr) -
 ingress:
   enabled: true
