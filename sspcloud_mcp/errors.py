@@ -132,6 +132,16 @@ def shell_mode_disabled() -> MCPToolError:
     )
 
 
+def shell_pod_not_allowed(pod: str, autorises: list[str]) -> MCPToolError:
+    liste = ", ".join(autorises) if autorises else "aucun"
+    return MCPToolError(
+        "SHELL_POD_NOT_ALLOWED",
+        f"Le mode shell n'est pas autorisé sur le pod {pod!r} (pods autorisés : {liste}).",
+        "La liste est SHELL_MODE_PODS dans l'environnement du pod MCP "
+        "(chart : shellMode.pods). Elle ne se change pas depuis une session.",
+    )
+
+
 def unknown_argument(tool: str, proches: dict[str, str], inconnus: list[str]) -> MCPToolError:
     suggestions = ", ".join(f"{a!r} -> {b!r}" for a, b in proches.items())
     return MCPToolError(

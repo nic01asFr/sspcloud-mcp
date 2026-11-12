@@ -35,6 +35,9 @@
   `exec(lang="bash")` transite par `kubectl exec` ; `exec_python` lève `NO_KERNEL_IN_SHELL_MODE`.
   Garde opt-in : `SHELL_MODE_ENABLED=true` requis côté serveur (désactivé par défaut).
   Audit-log : premier mot + longueur de la commande uniquement (pas le contenu).
+  Liste blanche : `SHELL_MODE_PODS` (noms exacts) doit nommer le pod, sinon `SHELL_POD_NOT_ALLOWED` ;
+  activé sans liste, rien n'est autorisé. Chart : `shellMode.enabled` et `shellMode.pods`
+  (survivent à `helm upgrade`).
   `NOT_A_JUPYTER_POD` hint enrichi pour suggérer `mode="shell"`. `mode` et `attach_pod` sont
   validés (`INVALID_ARGUMENT`), le pod du service lui-même est refusé (`SHELL_SELF_FORBIDDEN`),
   `read_file` / `write_file` fonctionnent en shell ; `pull_artifact` et `push_repo` (source

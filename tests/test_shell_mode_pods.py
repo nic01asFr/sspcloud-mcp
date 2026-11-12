@@ -127,6 +127,7 @@ def test_shell_mode_disabled_bloque(monkeypatch):
 def test_shell_mode_enabled_autorise(monkeypatch):
     """Avec SHELL_MODE_ENABLED=true, session_start(mode='shell') aboutit."""
     monkeypatch.setattr(tools, "_SHELL_MODE_ENABLED", True)
+    monkeypatch.setattr(tools, "_SHELL_MODE_PODS", frozenset({"atelier-0"}))
     monkeypatch.setenv("SSPCLOUD_NAMESPACE", "ns")
 
     s = DevSession(id="x", namespace="ns", pod="atelier-0")
@@ -138,6 +139,35 @@ def test_shell_mode_enabled_autorise(monkeypatch):
         "namespace": "ns",
     }))
     assert result["mode"] == "shell"
+
+
+# ── 5 bis. Liste blanche des pods ─────────────────────────────────────────────
+
+@pytest.mark.parametrize("autorises", [frozenset(), frozenset({"atelier-0"})])
+def test_pod_hors_liste_refuse(monkeypatch, autorises):
+    """Activé mais pod non nommé (liste vide ou autre pod) : SHELL_POD_NOT_ALLOWED."""
+    monkeypatch.setattr(tools, "_SHELL_MODE_ENABLED", True)
+    monkeypatch.setattr(tools, "_SHELL_MODE_PODS", autorises)
+    monkeypatch.setenv("SSPCLOUD_NAMESPACE", "ns")
+    mgr = _FakeMgr(DevSession(id="x", namespace="ns"))
+    with pytest.raises(MCPToolError) as exc:
+        _run(tools.session_start(mgr, {"mode": "shell", "attach_pod": "proj-autre-jupyter-python-0",
+                                       "namespace": "ns"}))
+    assert exc.value.code == "SHELL_POD_NOT_ALLOWED"
+    assert not mgr._saved
+
+
+def test_liste_lue_dans_lenvironnement(monkeypatch):
+    """SHELL_MODE_PODS : virgules et espaces, sans entrée vide."""
+    import importlib
+    monkeypatch.setenv("SHELL_MODE_PODS", "atelier-0, autre-0  ,")
+    try:
+        importlib.reload(tools)
+        assert tools._SHELL_MODE_PODS == frozenset({"atelier-0", "autre-0"})
+    finally:
+        monkeypatch.delenv("SHELL_MODE_PODS", raising=False)
+        importlib.reload(tools)
+    assert tools._SHELL_MODE_PODS == frozenset()
 
 
 # ── 6. Entrées hostiles ───────────────────────────────────────────────────────

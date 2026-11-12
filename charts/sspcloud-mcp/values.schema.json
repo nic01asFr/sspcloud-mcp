@@ -27,6 +27,20 @@
         }
       }
     },
+    "shellMode": {
+      "type": "object",
+      "title": "Mode shell",
+      "description": "Shell kubectl exec dans des pods nommés (hors Jupyter). Désactivé par défaut ; sans liste de pods, rien n'est autorisé.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false, "x-onyxia": { "hidden": true } },
+        "pods": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" },
+          "default": [],
+          "x-onyxia": { "hidden": true }
+        }
+      }
+    },
     "app": {
       "type": "object",
       "title": "Serveur MCP",

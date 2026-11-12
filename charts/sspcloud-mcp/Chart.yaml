@@ -7,7 +7,7 @@ description: >-
   Image ghcr.io/nic01asfr/sspcloud-mcp, chart publié sur GitHub.
 type: application
 # Version du chart (incrémentée à chaque changement de packaging).
-version: 0.4.0
+version: 0.4.1
 # Version applicative embarquée dans l'image GHCR.
 appVersion: "0.5.0"
 icon: https://raw.githubusercontent.com/InseeFrLab/onyxia/main/web/public/favicon.svg
